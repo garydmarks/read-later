@@ -960,7 +960,12 @@
     $('noteQuote').textContent = m.q;
     $('noteText').value = m.note || '';
     showDots(m.c);
+    setRemoveLabel(m.note);
     $('noteWrap').hidden = false;
+  }
+  // Removing a highlight deletes its note too, so the button says so whenever there is a note.
+  function setRemoveLabel(note) {
+    $('noteRemove').textContent = note ? 'Remove highlight and note' : 'Remove highlight';
   }
   // The note is kept as you type (and saved if the app closes), so closing always saves.
   function closeNote() {
@@ -1568,6 +1573,7 @@
   $('noteText').addEventListener('input', (e) => {
     const m = findMark(noteId);
     if (m) m.note = e.target.value.trim();
+    setRemoveLabel(e.target.value.trim());
   });
   $('noteDone').addEventListener('click', closeNote);
   $('noteBackdrop').addEventListener('click', closeNote);
