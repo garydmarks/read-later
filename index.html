@@ -87,7 +87,6 @@
     box-shadow: var(--shadow);
   }
   .btn-primary:active { transform: scale(.98); }
-  .btn-primary svg { width: 26px; height: 26px; }
 
   .link-btn {
     background: none; border: 0; padding: 12px 4px;
@@ -333,8 +332,8 @@
   <h1 class="app-title">Read Later</h1>
   <p class="app-sub">Copy text anywhere, then tap Paste. Your documents stay on this phone.</p>
 
+  <!-- Words only, no icon: the icon pushed the words off center -->
   <button id="pasteBtn" class="btn-primary" type="button">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
     Paste and read
   </button>
   <button id="manualToggle" class="link-btn" type="button">Paste by hand instead</button>
