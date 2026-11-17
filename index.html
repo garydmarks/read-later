@@ -173,8 +173,9 @@
     background: var(--accent); color: var(--accent-ink); font-weight: 600;
   }
   .find-row { flex-basis: 100%; display: flex; align-items: center; gap: 8px; padding: 0 0 2px 8px; }
-  .find-count { flex: 1; min-width: 0; font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .round.find-step { width: 40px; height: 40px; }
+  /* The count fills the middle, keeping "Read from here" (left) well away from the arrows (right) */
+  .find-count { flex: 1; min-width: 0; text-align: center; font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .round.find-step { width: 44px; height: 44px; } /* 44px: Apple's smallest comfortable tap size */
   .find-read {
     flex: none; height: 40px; padding: 0 14px; border-radius: 20px;
     border: 1px solid var(--accent); background: none; color: var(--accent); font-size: 15px; font-weight: 600;
@@ -395,7 +396,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
     </button>
     <button id="findDone" class="find-done" type="button" hidden>Done</button>
+    <!-- "Read from here" sits on the far left, away from the arrows: when it sat right next to the
+         down arrow, a slightly-off tap hit it and closed the search (Gary, iPhone, 2026-11-17) -->
     <div id="findRow" class="find-row" hidden>
+      <button id="findRead" class="find-read" type="button">Read from here</button>
       <span id="findCount" class="find-count" aria-live="polite"></span>
       <button id="findPrev" class="round find-step" type="button" aria-label="Previous match">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
@@ -403,7 +407,6 @@
       <button id="findNext" class="round find-step" type="button" aria-label="Next match">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
-      <button id="findRead" class="find-read" type="button">Read from here</button>
     </div>
   </div>
 
@@ -550,7 +553,9 @@
   // ---------- Storage (all on this phone, in the browser's storage for this page) ----------
   const DOCS_KEY = 'readlater.v1.docs';
   const PREFS_KEY = 'readlater.v1.prefs';
-  let storageBroken = false;
+  // Keys whose saved value couldn't be read. Each key is protected on its own: unreadable settings
+  // must not stop new documents from being saved (they used to share one flag).
+  const brokenKeys = new Set();
 
   // Reads a JSON value. A missing value means "first run"; a value we can't read is reported, never overwritten.
   function readJSON(key, fallback) {
@@ -559,10 +564,17 @@
     catch (e) { toast("This phone won't let the app save. Is Private Browsing on?"); return fallback; }
     if (raw === null) return fallback;
     try { return JSON.parse(raw); }
-    catch (e) { storageBroken = true; toast('Saved documents could not be read.'); return fallback; }
+    catch (e) {
+      brokenKeys.add(key);
+      toast(key === DOCS_KEY ? 'Saved documents could not be read.' : 'Saved settings could not be read.');
+      return fallback;
+    }
   }
   function writeJSON(key, value) {
-    if (storageBroken) return false; // don't save over data we failed to read
+    if (brokenKeys.has(key)) { // don't save over data we failed to read, and say so instead of failing silently
+      if (key === DOCS_KEY) toast('Saved documents could not be read, so changes can’t be saved.');
+      return false;
+    }
     try { localStorage.setItem(key, JSON.stringify(value)); return true; }
     catch (e) { toast('Phone storage is full. Delete an old document and try again.'); return false; }
   }
@@ -656,10 +668,19 @@
 
   // What the voice actually says: web addresses become the word "link", and rows of
   // dashes or underscores (email dividers) are dropped. The text on screen is not changed.
+  // Leftover pieces of a long web address also become "link": a very long address is cut into
+  // pieces (see chunk), and the later pieces don't start with "http", so they were read out letter
+  // by letter. A piece counts as part of an address if it is an unbroken run of 40+ characters
+  // holding / % = & ? or #, or any unbroken run of 60+ (no real word is that long, even a long
+  // medical word). (Fixed here, not in chunk, because changing how the text is cut would move
+  // saved highlights.)
+  const looksLikeLinkPiece = (w) => w.length >= 60 || /[\/%=&?#]/.test(w);
   function speakable(t) {
-    return t.replace(/(https?:\/\/|www\.)\S+/gi, ' link ').replace(/[_=*~\-]{4,}/g, ' ').replace(/\s+/g, ' ').trim();
+    return t.replace(/(https?:\/\/|www\.)\S+/gi, ' link ').replace(/[_=*~\-]{4,}/g, ' ')
+      .replace(/\S{40,}/g, (w) => looksLikeLinkPiece(w) ? ' link ' : w).replace(/\s+/g, ' ').trim();
   }
-  const hasWords = (t) => /[A-Za-z0-9]/.test(t);
+  // Any letter or digit in any language (not only A to Z), so accented or non-English text isn't skipped.
+  const hasWords = (t) => /[\p{L}\p{N}]/u.test(t);
 
   function makeTitle(text) {
     const first = text.split('\n').map(l => l.trim()).find(Boolean) || 'Untitled';
@@ -776,6 +797,8 @@
   let autoScrollUntil = 0; // while the app itself is scrolling, don't mistake it for your finger
   let finds = [];        // search matches: [{a: {i, o}, b: {i, o}}] (start and end, as sentence + character)
   let findAt = -1;       // the match you're on
+  let findTimer = 0;     // a search waiting for you to pause typing (0 = none)
+  let sentEls = [];      // the page element for each sentence, by number (filled by renderSentences)
   const synth = window.speechSynthesis;
 
   function openDoc(id) {
@@ -804,6 +827,7 @@
   // Your highlights are painted in as it goes; the sentence text itself is never changed.
   function renderSentences(container, from) {
     container.textContent = '';
+    sentEls = [];
     const idx = markIndex();
     let p = null, lastPara = -1;
     for (let i = from; i < sents.length; i++) {
@@ -819,6 +843,7 @@
       span.dataset.i = i;
       fillSentence(span, sents[i].t, idx.get(i));
       p.appendChild(span);
+      sentEls[i] = span;
     }
     if (finds.length) paintFinds(); // the page was rebuilt, so the search marks must be redrawn on the new text
   }
@@ -1453,9 +1478,13 @@
     playing = true;
     setPlayIcon();
     keepAwake(true);
+    // New token first: if the phone reports the cancelled sentence as "ended", that report is now
+    // stale and ignored (otherwise it moved the spot one sentence on and queued a sentence twice).
+    // The same token stops two quick restarts (for example two fast taps on Next) both speaking.
+    const my = ++token;
     synth.cancel();
     // A short pause after cancel() avoids an iPhone glitch where the next sentence is skipped.
-    setTimeout(() => { if (playing) speakCurrent(); }, 60);
+    setTimeout(() => { if (playing && my === token) speakCurrent(); }, 60);
   }
 
   function stop() {
@@ -1540,7 +1569,9 @@
 
   // {i, o} -> the exact spot in the page's text (highlights split a sentence into several pieces).
   function domPoint(i, o) {
-    const span = $('readerText').querySelector('.s[data-i="' + i + '"]');
+    // Looked up by number, not by searching the page: a search with thousands of matches in a long
+    // document used to scan the whole page twice per match and could freeze the phone.
+    const span = sentEls[i];
     const walk = document.createTreeWalker(span, NodeFilter.SHOW_TEXT);
     let n, last = null;
     while ((n = walk.nextNode())) {
@@ -1563,8 +1594,18 @@
     CSS.highlights.delete('rl-find');
     CSS.highlights.delete('rl-find-now');
     if (!finds.length) return;
-    CSS.highlights.set('rl-find', new Highlight(...finds.map(findRange)));
-    if (findAt >= 0) CSS.highlights.set('rl-find-now', new Highlight(findRange(finds[findAt])));
+    // Added one at a time: passing tens of thousands of matches in one call (a one-letter search in a
+    // long document) can go over the browser's limit and stop the search with an error.
+    const all = new Highlight();
+    for (const f of finds) all.add(findRange(f));
+    CSS.highlights.set('rl-find', all);
+    paintFindNow();
+  }
+  // Only the bright "you're here" match: stepping with the arrows redraws just this one, not every match.
+  function paintFindNow() {
+    if (!canPaint) return;
+    CSS.highlights.delete('rl-find-now');
+    if (findAt >= 0 && finds.length) CSS.highlights.set('rl-find-now', new Highlight(findRange(finds[findAt])));
   }
 
   function showFindCount() {
@@ -1586,7 +1627,7 @@
   function stepFind(dir) {
     if (!finds.length) return;
     findAt = (findAt + dir + finds.length) % finds.length; // wraps around at either end
-    paintFinds();
+    paintFindNow();
     showFindCount();
     scrollToFind();
   }
@@ -1602,6 +1643,8 @@
     runFind($('findInput').value); // reopening keeps your last search
   }
   function closeFind() {
+    clearTimeout(findTimer); // a search still waiting on your typing must not run after the bar is closed
+    findTimer = 0;
     finds = [];
     findAt = -1;
     paintFinds(); // with no matches left, this clears the orange marks
@@ -1631,7 +1674,9 @@
 
   // If you switch away and come back, iPhone drops the "stay awake" request, and may stop the voice.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
+    // Leaving the app: save now. iPhone often closes a Home Screen app in the background without any
+    // other warning, and a note you were typing (kept only in memory until Save) would be lost.
+    if (document.visibilityState !== 'visible') { if (cur) savePos(); return; }
     if (!playing) return;
     keepAwake(true);
     setTimeout(() => {
@@ -1666,7 +1711,9 @@
     document.documentElement.style.setProperty('--read-size', prefs.size + 'px');
     if (!save) return;
     savePrefs();
-    if (cur && currentView() === 'readerView') scrollToCurrent(false, true);
+    // Keeps the reading spot in view only if you were following it. If you had scrolled away
+    // (for example to a search match), resizing no longer throws you back to the reading spot.
+    if (cur && currentView() === 'readerView') scrollToCurrent(false);
   }
 
   // ---------- Pinch the text to resize it (and remember the size) ----------
@@ -1687,12 +1734,17 @@
     pinch.live = true;
     setSize(pinch.size * ratio, false);
   }, { passive: false });
-  document.addEventListener('touchend', (e) => {
+  // A pinch ends when a finger lifts, or when iPhone cancels the touch (a call, a notification, a
+  // system swipe). Without the cancel case the pinch stayed "open", and the next ordinary tap saved
+  // the size and jumped the page, or a two-finger scroll in a pop-up resized the reading text.
+  const endPinch = (e) => {
     if (!pinch || e.touches.length >= 2) return;
     const changed = pinch.live;
     pinch = null;
     if (changed) { setSize(prefs.size, true); toast('Text size ' + prefs.size + ' saved.', 1500); }
-  }, { passive: true });
+  };
+  document.addEventListener('touchend', endPinch, { passive: true });
+  document.addEventListener('touchcancel', endPinch, { passive: true });
   // Safari's own pinch-zoom events: block them so the page never zooms out and shrinks the buttons.
   for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
     document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
@@ -1729,20 +1781,28 @@
   $('readerBack').addEventListener('click', () => { stop(); closeFind(); cur = null; renderLibrary(); show('libraryView'); });
 
   // Search: results update as you type (after a short pause); the keyboard's Search key goes to the next match.
-  let findTimer = 0;
   $('findBtn').addEventListener('click', openFind);
   $('findDone').addEventListener('click', closeFind);
   $('findInput').addEventListener('input', () => {
     clearTimeout(findTimer);
-    findTimer = setTimeout(() => runFind($('findInput').value), 250);
+    findTimer = setTimeout(() => { findTimer = 0; runFind($('findInput').value); }, 250);
   });
+  // If you tap an arrow (or Search) before that short pause is over, search for what you typed first,
+  // instead of stepping through the matches for the old words. Returns true if it searched.
+  function finishTyping() {
+    if (!findTimer) return false;
+    clearTimeout(findTimer);
+    findTimer = 0;
+    runFind($('findInput').value);
+    return true;
+  }
   $('findInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); clearTimeout(findTimer); if (finds.length) stepFind(1); else runFind($('findInput').value); }
+    if (e.key === 'Enter') { e.preventDefault(); if (!finishTyping()) stepFind(1); }
     if (e.key === 'Escape') closeFind();
   });
-  $('findPrev').addEventListener('click', () => stepFind(-1));
-  $('findNext').addEventListener('click', () => stepFind(1));
-  $('findRead').addEventListener('click', readFromFind);
+  $('findPrev').addEventListener('click', () => { if (!finishTyping()) stepFind(-1); });
+  $('findNext').addEventListener('click', () => { if (!finishTyping()) stepFind(1); });
+  $('findRead').addEventListener('click', () => { finishTyping(); readFromFind(); });
   $('playBtn').addEventListener('click', () => (playing ? stop() : play()));
   $('prevBtn').addEventListener('click', () => jumpTo(cur.pos - 1));
   $('nextBtn').addEventListener('click', () => jumpTo(cur.pos + 1));
