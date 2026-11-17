@@ -145,7 +145,7 @@
   /* ---------- Top bar (reading page) ---------- */
   .topbar {
     position: sticky; top: 0; z-index: 5;
-    display: flex; align-items: center; gap: 8px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; /* wrap: the search row drops to a second line */
     margin: calc(-1 * (env(safe-area-inset-top) + 16px)) -16px 0;
     padding: calc(env(safe-area-inset-top) + 6px) 8px 6px;
     background: var(--bg); border-bottom: 1px solid var(--line);
@@ -157,6 +157,36 @@
   }
   .back svg { width: 26px; height: 26px; }
   .topbar-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  /* ---------- Search this document ---------- */
+  .icon-btn {
+    flex: none; width: 44px; height: 44px; border: 0; background: none; color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-btn svg { width: 24px; height: 24px; }
+  .find-input {
+    flex: 1; min-width: 0; height: 40px; padding: 0 12px; font-size: 16px; /* 16px stops iPhone zooming in on the box */
+    border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  }
+  .find-done {
+    flex: none; min-height: 40px; padding: 0 14px; border: 0; border-radius: 20px;
+    background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  }
+  .find-row { flex-basis: 100%; display: flex; align-items: center; gap: 8px; padding: 0 0 2px 8px; }
+  .find-count { flex: 1; min-width: 0; font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .round.find-step { width: 40px; height: 40px; }
+  .find-read {
+    flex: none; height: 40px; padding: 0 14px; border-radius: 20px;
+    border: 1px solid var(--accent); background: none; color: var(--accent); font-size: 15px; font-weight: 600;
+  }
+  .find-row button:disabled { opacity: .4; }
+  /* Search matches: pale orange for every match, strong orange for the one you're on */
+  /* The underline keeps a match visible even on top of your own yellow highlight */
+  ::highlight(rl-find) {
+    background-color: rgba(255, 140, 26, .35);
+    text-decoration: underline 3px #e8590c;
+  }
+  ::highlight(rl-find-now) { background-color: #ff8c1a; color: #000; }
 
   /* ---------- The text being read ---------- */
   .reading {
@@ -358,6 +388,23 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
     <div id="readerTitle" class="topbar-title"></div>
+    <!-- Search: the box takes the title's place; the row below steps through the matches -->
+    <input id="findInput" class="find-input" type="search" placeholder="Search this document" aria-label="Search this document"
+           enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" hidden>
+    <button id="findBtn" class="icon-btn" type="button" aria-label="Search this document">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+    </button>
+    <button id="findDone" class="find-done" type="button" hidden>Done</button>
+    <div id="findRow" class="find-row" hidden>
+      <span id="findCount" class="find-count" aria-live="polite"></span>
+      <button id="findPrev" class="round find-step" type="button" aria-label="Previous match">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
+      <button id="findNext" class="round find-step" type="button" aria-label="Next match">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <button id="findRead" class="find-read" type="button">Read from here</button>
+    </div>
   </div>
 
   <div id="readerText" class="reading"></div>
@@ -727,10 +774,13 @@
   let token = 0;         // bumps on every start/stop so old speech events are ignored
   let follow = true;     // true = the screen follows the sentence being read
   let autoScrollUntil = 0; // while the app itself is scrolling, don't mistake it for your finger
+  let finds = [];        // search matches: [{a: {i, o}, b: {i, o}}] (start and end, as sentence + character)
+  let findAt = -1;       // the match you're on
   const synth = window.speechSynthesis;
 
   function openDoc(id) {
     stop();
+    closeFind();
     $('noteWrap').hidden = true;
     $('listWrap').hidden = true;
     $('markBar').hidden = true;
@@ -770,6 +820,7 @@
       fillSentence(span, sents[i].t, idx.get(i));
       p.appendChild(span);
     }
+    if (finds.length) paintFinds(); // the page was rebuilt, so the search marks must be redrawn on the new text
   }
 
   // ---------- Highlights and notes ----------
@@ -922,6 +973,13 @@
   // The selection bar: shows while text is selected. iPhone may clear the selection the moment
   // a button is touched, so the bar acts on touch-down and keeps the last selection it saw.
   let selTimer = 0, hadSel = false, selClearedAt = 0, pendingSel = null;
+  // When a bar button is pressed, the bar vanishes at once and "Back to reading spot" would pop up in
+  // the same place, under your finger, so the end of that same tap hit it and threw you back to your
+  // reading spot (Gary, iPhone, 2026-11-17). For a moment after a bar press, that button stays hidden
+  // and taps on it or on the text are ignored.
+  let barActedAt = 0;
+  const BAR_SETTLE_MS = 700;
+  const barJustActed = () => Date.now() - barActedAt < BAR_SETTLE_MS;
   document.addEventListener('selectionchange', () => {
     const sel = window.getSelection();
     const has = !!sel && !sel.isCollapsed;
@@ -944,6 +1002,8 @@
   function markBarAction(btn) {
     const r = readSelection() || pendingSel;
     if (!r || !cur) return;
+    barActedAt = Date.now();
+    setTimeout(updatePill, BAR_SETTLE_MS + 50); // show "Back to reading spot" again once your finger is up
     window.getSelection().removeAllRanges();
     $('markBar').hidden = true;
     pendingSel = null;
@@ -1032,62 +1092,84 @@
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const EXPORT_COLORS = { yellow: '#ffd43b', blue: '#bfe0ff', red: '#ffc4c0' };
 
-  // Walks the document paragraph by paragraph. For each sentence, `piece(text, mark)` turns a stretch
-  // of text into output (mark = null for plain text). After each paragraph, `noteAfter(mark)` adds
-  // any note whose highlight ended in that paragraph. Returns a list of paragraph blocks.
-  function walkDoc(piece, noteAfter) {
+  // Walks the document in reading order and returns a list of blocks: {text} for a stretch of a
+  // paragraph, and {note: mark} for a note. A note goes right after the SENTENCE where its highlight
+  // ends (not at the end of the paragraph), so in a long paragraph it sits next to what it's about;
+  // the paragraph carries on below the note. `piece(text, mark, first)` turns a stretch of text into
+  // output: mark = null for plain text, first = true for the opening piece of a highlight.
+  function walkDoc(piece) {
     const idx = markIndex();
-    const blocks = [];
-    let parts = [], notes = [], lastP = -1;
+    const out = [];
+    let parts = [], lastP = -1;
     const flush = () => {
-      if (parts.length) blocks.push({ text: parts.join(' '), notes });
-      parts = []; notes = [];
+      if (parts.length) out.push({ text: parts.join(' ') });
+      parts = [];
     };
     for (let i = 0; i < sents.length; i++) {
       if (sents[i].p !== lastP) { flush(); lastP = sents[i].p; }
       const t = sents[i].t;
-      let out = '', at = 0;
+      const notes = [];
+      let s = '', at = 0;
       for (const pc of idx.get(i) || []) {
-        out += piece(t.slice(at, pc.from), null) + piece(t.slice(pc.from, pc.to), pc.m);
-        if (pc.m.note && pc.m.e === i) notes.push(noteAfter(pc.m));
+        s += piece(t.slice(at, pc.from), null, false) + piece(t.slice(pc.from, pc.to), pc.m, i === pc.m.s);
+        if (pc.m.note && pc.m.e === i) notes.push(pc.m);
         at = pc.to;
       }
-      parts.push(out + piece(t.slice(at), null));
+      parts.push(s + piece(t.slice(at), null, false));
+      if (notes.length) { flush(); for (const m of notes) out.push({ note: m }); }
     }
     flush();
-    return blocks;
+    return out;
   }
 
-  // A web page file: opens in any browser (or Word) with the colors, each note boxed under its
-  // paragraph, and every highlight and note listed at the end.
+  // Shortens long text for a label, ending in "…".
+  const clip = (s, n) => s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
+
+  // A web page file: opens in any browser (or Word) with the colors, each note boxed right after
+  // the sentence its highlight ends in, and every highlight and note listed at the end.
+  // Tapping a note box, or a highlight in the end list, jumps to that highlight and outlines it.
+  // No scripts in the file (email systems distrust them): the jumps are plain in-page links.
   function exportHTML() {
-    const blocks = walkDoc(
-      (t, m) => m ? '<mark style="background:' + EXPORT_COLORS[m.c] + '">' + esc(t) + '</mark>' : esc(t),
-      (m) => '<div class="note"><b>Note</b> on “' + esc(m.q) + '”<br>' + esc(m.note).replace(/\n/g, '<br>') + '</div>'
-    );
-    const body = blocks.map(b => '<p>' + b.text + '</p>' + b.notes.join('')).join('\n');
+    const linked = marksOk(); // highlights are painted (and can be jumped to) only when this is true
+    const bg = (m) => 'background:' + EXPORT_COLORS[m.c];
+    const blocks = walkDoc((t, m, first) => !m ? esc(t)
+      : '<mark ' + (first ? 'id="h-' + m.id + '" ' : '') + 'style="' + bg(m) + '">' + esc(t) + '</mark>');
+    const noteHTML = (m) => esc(m.note).replace(/\n/g, '<br>');
+    const body = blocks.map(b => b.note
+      ? '<a class="note" href="#h-' + b.note.id + '"><span class="note-head">↑ Note on “' + esc(clip(b.note.q, 70)) + '”</span>' + noteHTML(b.note) + '</a>'
+      : '<p>' + b.text + '</p>').join('\n');
     const marks = (cur.marks || []).slice().sort(byPos);
     const list = marks.length
-      ? '<h2>Highlights and notes</h2>\n<ul>' + marks.map(m =>
-          '<li><mark style="background:' + EXPORT_COLORS[m.c] + '">' + esc(m.q) + '</mark>'
-          + (m.note ? '<div class="note">' + esc(m.note).replace(/\n/g, '<br>') + '</div>' : '') + '</li>').join('') + '</ul>'
+      ? '<h2 id="list">Highlights and notes</h2>\n'
+        + (linked ? '<p class="meta">Tap a highlight to go to it in the text.</p>\n' : '')
+        + '<ul>' + marks.map(m => {
+          const hl = '<mark style="' + bg(m) + '">' + esc(m.q) + '</mark>';
+          return '<li>' + (linked ? '<a class="jump" href="#h-' + m.id + '">' + hl + '</a>' : hl)
+            + (m.note ? '<div class="note">' + noteHTML(m) + '</div>' : '') + '</li>';
+        }).join('') + '</ul>'
       : '';
+    const toList = marks.length ? ' · <a href="#list">Go to all highlights and notes</a>' : '';
     return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
       + '<meta name="viewport" content="width=device-width, initial-scale=1">'
       + '<title>' + esc(cur.title) + '</title><style>'
-      + 'body{font:18px/1.6 Georgia,serif;color:#1c1d1f;background:#fff;max-width:720px;margin:24px auto;padding:0 16px;overflow-wrap:anywhere}'
+      // print-color-adjust: printers keep the highlight colors (browsers drop background colors when printing otherwise)
+      + 'body{font:18px/1.6 Georgia,serif;color:#1c1d1f;background:#fff;max-width:720px;margin:24px auto;padding:0 16px;overflow-wrap:anywhere;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
       + 'h1{font:700 24px/1.3 -apple-system,"Segoe UI",sans-serif}h2{font:700 19px -apple-system,"Segoe UI",sans-serif;margin-top:40px;border-top:1px solid #ddd;padding-top:24px}'
-      + '.meta{color:#5d6066;font:14px -apple-system,"Segoe UI",sans-serif}mark{color:inherit;border-radius:3px;padding:1px 0}'
-      + '.note{font:15px/1.45 -apple-system,"Segoe UI",sans-serif;background:#f4f1ea;border-radius:8px;padding:8px 12px;margin:-6px 0 18px}'
-      + 'li{margin-bottom:14px}li .note{margin:6px 0 0}'
-      + '</style></head><body>\n<h1>' + esc(cur.title) + '</h1>\n<p class="meta">From Read Later, ' + esc(new Date().toLocaleDateString()) + '</p>\n'
+      + 'p{margin:0 0 1em}.meta{color:#5d6066;font:14px -apple-system,"Segoe UI",sans-serif}.meta a{color:#0d6b6e}'
+      + 'mark{color:inherit;border-radius:3px;padding:1px 0;scroll-margin-top:35vh}'
+      // The highlight you jumped to gets a teal outline, so you can see which one it is
+      + 'mark:target{outline:3px solid #0d6b6e;outline-offset:2px}'
+      + '.note{display:block;color:inherit;text-decoration:none;font:15px/1.45 -apple-system,"Segoe UI",sans-serif;background:#f4f1ea;border-radius:8px;padding:8px 12px;margin:-4px 0 1em}'
+      + '.note-head{display:block;font-weight:700;color:#0d6b6e;margin-bottom:2px}'
+      + 'a.jump{color:inherit;text-decoration:none}li{margin-bottom:14px}li .note{margin:6px 0 0}'
+      + '</style></head><body>\n<h1>' + esc(cur.title) + '</h1>\n<p class="meta">From Read Later, ' + esc(new Date().toLocaleDateString()) + toList + '</p>\n'
       + body + '\n' + list + '\n</body></html>\n';
   }
 
   // The same thing as plain text, for when the iPhone won't share a file: «highlights» and notes marked.
   function exportMarkedText() {
-    const blocks = walkDoc((t, m) => m ? '«' + t + '»' : t, (m) => 'NOTE on «' + m.q + '»: ' + m.note);
-    const text = blocks.map(b => [b.text, ...b.notes].join('\n')).join('\n\n');
+    const blocks = walkDoc((t, m) => m ? '«' + t + '»' : t);
+    const text = blocks.map(b => b.note ? 'NOTE on «' + b.note.q + '»: ' + b.note.note : b.text).join('\n\n');
     return (cur.marks || []).length ? text + '\n\n----------\nHIGHLIGHTS AND NOTES\n\n' + marksAsText() : text;
   }
 
@@ -1186,7 +1268,8 @@
     const above = r && r.bottom < strip.top + 4;
     const below = r && r.top > strip.bottom - 4;
     // Hidden while the highlight bar is up (they'd sit in the same spot).
-    pill.hidden = !(above || below) || Date.now() < autoScrollUntil || !$('markBar').hidden;
+    // Also hidden for a moment after a highlight-bar press (see barActedAt).
+    pill.hidden = !(above || below) || Date.now() < autoScrollUntil || !$('markBar').hidden || barJustActed();
     if (!pill.hidden) {
       $('spotArrow').style.transform = above ? 'rotate(180deg)' : '';
       pill.style.bottom = (window.innerHeight - strip.bottom + 12) + 'px';
@@ -1405,6 +1488,139 @@
     if (playing) play();
   }
 
+  // ---------- Search this document ----------
+  // Finds a word or phrase anywhere in the document (capitals ignored; straight and curly quotes
+  // count as the same). The arrows step through the matches and wrap around at either end.
+  // Moving between matches only scrolls the page, so your reading spot is safe until you tap
+  // "Read from here".
+  const canPaint = typeof CSS !== 'undefined' && !!CSS.highlights && typeof Highlight === 'function';
+
+  function findPattern(q) {
+    const words = q.trim().split(/\s+/).map(w => w
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')        // treat symbols in what you typed as plain text
+      .replace(/['’‘]/g, "['’‘]").replace(/["“”]/g, '["“”]'));
+    return new RegExp(words.join('\\s+'), 'gi');      // any run of spaces between words matches
+  }
+
+  // Searches paragraph by paragraph (sentences joined with a space, the way they show on screen),
+  // so a phrase that runs from one sentence piece into the next is still found.
+  function runFind(q) {
+    finds = [];
+    findAt = -1;
+    if (q.trim()) {
+      const re = findPattern(q);
+      let i = 0;
+      while (i < sents.length) {
+        const p = sents[i].p, starts = [], texts = [];
+        let len = 0;
+        for (; i < sents.length && sents[i].p === p; i++) {
+          starts.push({ i, at: len });
+          texts.push(sents[i].t);
+          len += sents[i].t.length + 1;
+        }
+        for (const m of texts.join(' ').matchAll(re)) {
+          finds.push({ a: paraPoint(starts, m.index, false), b: paraPoint(starts, m.index + m[0].length, true) });
+        }
+      }
+      // Start at the first match at or after your reading spot, so a search doesn't throw you back to the top.
+      findAt = finds.length ? Math.max(0, finds.findIndex(f => f.a.i >= cur.pos)) : -1;
+    }
+    paintFinds();
+    showFindCount();
+    if (findAt >= 0) scrollToFind();
+  }
+  // A character position in a joined paragraph -> {i: sentence, o: character in that sentence}.
+  // An end position that lands on the space between two sentences belongs to the earlier one.
+  function paraPoint(starts, off, isEnd) {
+    let k = starts.length - 1;
+    while (k > 0 && (isEnd ? starts[k].at >= off : starts[k].at > off)) k--;
+    const i = starts[k].i;
+    return { i, o: Math.min(off - starts[k].at, sents[i].t.length) };
+  }
+
+  // {i, o} -> the exact spot in the page's text (highlights split a sentence into several pieces).
+  function domPoint(i, o) {
+    const span = $('readerText').querySelector('.s[data-i="' + i + '"]');
+    const walk = document.createTreeWalker(span, NodeFilter.SHOW_TEXT);
+    let n, last = null;
+    while ((n = walk.nextNode())) {
+      if (o <= n.length) return [n, o];
+      o -= n.length;
+      last = n;
+    }
+    return last ? [last, last.length] : [span, 0];
+  }
+  function findRange(f) {
+    const r = document.createRange();
+    r.setStart(...domPoint(f.a.i, f.a.o));
+    r.setEnd(...domPoint(f.b.i, f.b.o));
+    return r;
+  }
+
+  // Colors the matches without changing the page's text (the iPhone draws them on top).
+  function paintFinds() {
+    if (!canPaint) return;
+    CSS.highlights.delete('rl-find');
+    CSS.highlights.delete('rl-find-now');
+    if (!finds.length) return;
+    CSS.highlights.set('rl-find', new Highlight(...finds.map(findRange)));
+    if (findAt >= 0) CSS.highlights.set('rl-find-now', new Highlight(findRange(finds[findAt])));
+  }
+
+  function showFindCount() {
+    const q = $('findInput').value.trim();
+    $('findCount').textContent = !q ? '' : finds.length ? (findAt + 1) + ' of ' + finds.length : 'No matches';
+    for (const id of ['findPrev', 'findNext', 'findRead']) $(id).disabled = !finds.length;
+  }
+
+  // Brings the current match to the middle of the part of the screen you can see (above the keyboard, if it's open).
+  // This counts as you scrolling away, so "Back to reading spot" shows up if your spot is off screen.
+  function scrollToFind() {
+    const r = findRange(finds[findAt]).getBoundingClientRect();
+    const strip = visibleStrip();
+    if (window.visualViewport) strip.bottom = Math.min(strip.bottom, visualViewport.offsetTop + visualViewport.height);
+    autoScrollUntil = 0;
+    window.scrollBy({ top: (r.top + r.height / 2) - (strip.top + strip.bottom) / 2, behavior: 'auto' });
+  }
+
+  function stepFind(dir) {
+    if (!finds.length) return;
+    findAt = (findAt + dir + finds.length) % finds.length; // wraps around at either end
+    paintFinds();
+    showFindCount();
+    scrollToFind();
+  }
+
+  function openFind() {
+    $('readerTitle').hidden = true;
+    $('findBtn').hidden = true;
+    $('findInput').hidden = false;
+    $('findDone').hidden = false;
+    $('findRow').hidden = false;
+    $('findInput').focus();
+    $('findInput').select();
+    runFind($('findInput').value); // reopening keeps your last search
+  }
+  function closeFind() {
+    finds = [];
+    findAt = -1;
+    paintFinds(); // with no matches left, this clears the orange marks
+    $('findInput').blur();
+    $('readerTitle').hidden = false;
+    $('findBtn').hidden = false;
+    $('findInput').hidden = true;
+    $('findDone').hidden = true;
+    $('findRow').hidden = true;
+  }
+  // "Read from here": moves your reading spot to the match's sentence and starts reading.
+  function readFromFind() {
+    if (findAt < 0) return;
+    const i = finds[findAt].a.i;
+    closeFind();
+    jumpTo(i);
+    if (!playing) play();
+  }
+
   // Swaps the triangle for the two bars while reading.
   // (These are SVG pictures, which ignore the ".hidden" shortcut, so we set the attribute itself.)
   function setPlayIcon() {
@@ -1510,14 +1726,30 @@
     renderLibrary();
   });
 
-  $('readerBack').addEventListener('click', () => { stop(); cur = null; renderLibrary(); show('libraryView'); });
+  $('readerBack').addEventListener('click', () => { stop(); closeFind(); cur = null; renderLibrary(); show('libraryView'); });
+
+  // Search: results update as you type (after a short pause); the keyboard's Search key goes to the next match.
+  let findTimer = 0;
+  $('findBtn').addEventListener('click', openFind);
+  $('findDone').addEventListener('click', closeFind);
+  $('findInput').addEventListener('input', () => {
+    clearTimeout(findTimer);
+    findTimer = setTimeout(() => runFind($('findInput').value), 250);
+  });
+  $('findInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); clearTimeout(findTimer); if (finds.length) stepFind(1); else runFind($('findInput').value); }
+    if (e.key === 'Escape') closeFind();
+  });
+  $('findPrev').addEventListener('click', () => stepFind(-1));
+  $('findNext').addEventListener('click', () => stepFind(1));
+  $('findRead').addEventListener('click', readFromFind);
   $('playBtn').addEventListener('click', () => (playing ? stop() : play()));
   $('prevBtn').addEventListener('click', () => jumpTo(cur.pos - 1));
   $('nextBtn').addEventListener('click', () => jumpTo(cur.pos + 1));
   $('readerText').addEventListener('click', (e) => {
     // Finishing or clearing a text selection is not a tap to jump.
     const sel = window.getSelection();
-    if ((sel && !sel.isCollapsed) || Date.now() - selClearedAt < 500) return;
+    if ((sel && !sel.isCollapsed) || Date.now() - selClearedAt < 500 || barJustActed()) return;
     // A tap on a highlight (or its note icon) opens the note and leaves your reading spot alone.
     const hit = e.target.closest('[data-m]');
     if (hit) { openNote(hit.dataset.m); return; }
@@ -1583,7 +1815,7 @@
       toast('Couldn’t copy. Try again.');
     }
   });
-  $('spotPill').addEventListener('click', () => scrollToCurrent(true, true));
+  $('spotPill').addEventListener('click', () => { if (!barJustActed()) scrollToCurrent(true, true); });
 
   // Hide the controls: tap the little handle or swipe down on the bar. Bring them back: tap or swipe up on the tab.
   $('grabber').addEventListener('click', () => setCollapsed(true));
@@ -1600,8 +1832,9 @@
   $('backdrop').addEventListener('click', closeSheet);
   $('rateInput').addEventListener('input', (e) => { $('rateText').textContent = (+e.target.value) + '×'; });
   $('rateInput').addEventListener('change', (e) => setRate(+e.target.value));
-  $('rateDown').addEventListener('click', () => setRate(prefs.rate - 0.1));
-  $('rateUp').addEventListener('click', () => setRate(prefs.rate + 0.1));
+  // The − and + buttons step by 0.05 (the same fine steps as the slider).
+  $('rateDown').addEventListener('click', () => setRate(prefs.rate - 0.05));
+  $('rateUp').addEventListener('click', () => setRate(prefs.rate + 0.05));
   $('voiceSelect').addEventListener('change', (e) => {
     prefs.voiceURI = e.target.value;
     savePrefs();
@@ -1642,7 +1875,9 @@
     state: () => ({ view: currentView(), playing, pos: cur && cur.pos, total: sents.length, docs: docs.length, follow, collapsed: isCollapsed() }),
     addDoc, openDoc, toSentences, speakable, shortlist, voiceLabel,
     marks: () => cur && cur.marks, addMark, readSelection, sliceText, marksAsText, openNote,
-    exportHTML, exportMarkedText
+    exportHTML, exportMarkedText,
+    find: (q) => { openFind(); $('findInput').value = q; runFind(q); return { n: finds.length, at: findAt }; },
+    finds: () => finds.map(f => ({ ...f, text: findRange(f).toString() })), findAt: () => findAt, stepFind
   };
 })();
 </script>
