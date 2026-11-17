@@ -133,7 +133,7 @@
   .empty { color: var(--muted); padding: 16px 0; font-size: 16px; }
   .danger-link { color: var(--danger); margin-top: 24px; }
 
-  /* ---------- Top bar (reader and Speak Screen views) ---------- */
+  /* ---------- Top bar (reading page) ---------- */
   .topbar {
     position: sticky; top: 0; z-index: 5;
     display: flex; align-items: center; gap: 8px;
@@ -148,13 +148,6 @@
   }
   .back svg { width: 26px; height: 26px; }
   .topbar-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .top-action {
-    flex: none; display: flex; align-items: center; gap: 6px;
-    min-height: 40px; padding: 0 12px; border-radius: 20px;
-    border: 1px solid var(--line); background: var(--surface);
-    color: var(--accent); font-size: 15px; font-weight: 600;
-  }
-  .top-action svg { width: 20px; height: 20px; }
 
   /* ---------- The text being read ---------- */
   .reading {
@@ -311,9 +304,6 @@
   .hint { font-size: 14px; color: var(--muted); margin: 0; }
   .sheet > .btn-secondary { width: 100%; } /* only the full-width Rename button, not the A- / A+ pair */
 
-  /* ---------- Speak Screen view ---------- */
-  #speakView .reading { padding-bottom: 24px; }
-  .speak-foot { border-top: 1px solid var(--line); padding: 16px 0 60vh; color: var(--muted); font-size: 15px; }
 
   .toast {
     position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 64px);
@@ -359,11 +349,6 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
     <div id="readerTitle" class="topbar-title"></div>
-    <!-- One tap to the view made for the iPhone's own Speak Screen voice -->
-    <button id="speakViewBtn" class="top-action" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-5 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M8 9h8M8 12.5h5"/></svg>
-      Speak Screen
-    </button>
   </div>
 
   <div id="readerText" class="reading"></div>
@@ -487,17 +472,6 @@
   </div>
 </div>
 
-<!-- ===================== Speak Screen view ===================== -->
-<section id="speakView" class="view" hidden>
-  <div class="topbar">
-    <button id="speakDone" class="back" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-      Done
-    </button>
-  </div>
-  <div id="speakText" class="reading"></div>
-  <div class="speak-foot">End of document.</div>
-</section>
 
 <div id="toast" class="toast" role="status" hidden></div>
 
@@ -544,7 +518,7 @@
   const savePrefs = () => writeJSON(PREFS_KEY, prefs);
 
   // ---------- Screen switching and dates ----------
-  const VIEWS = ['libraryView', 'readerView', 'speakView'];
+  const VIEWS = ['libraryView', 'readerView'];
   const currentView = () => VIEWS.find(id => !$(id).hidden);
   function show(viewId) {
     for (const id of VIEWS) $(id).hidden = id !== viewId;
@@ -1192,16 +1166,12 @@
 
   // Your finger scrolled the page: stop following if the spot went off screen, start again if it came back.
   window.addEventListener('scroll', () => {
-    const view = currentView();
-    if (view === 'readerView' && cur) {
-      if (Date.now() < autoScrollUntil) return;
-      const r = curRect();
-      const strip = visibleStrip();
-      follow = !!r && r.bottom > strip.top && r.top < strip.bottom;
-      updatePill();
-    } else if (view === 'speakView' && cur) {
-      trackSpeakScroll();
-    }
+    if (currentView() !== 'readerView' || !cur) return;
+    if (Date.now() < autoScrollUntil) return;
+    const r = curRect();
+    const strip = visibleStrip();
+    follow = !!r && r.bottom > strip.top && r.top < strip.bottom;
+    updatePill();
   }, { passive: true });
 
   // ---------- Hiding and showing the controls ----------
@@ -1295,7 +1265,7 @@
     sel.hidden = list.length === 0;
     $('voiceNote').textContent = list.length
       ? ''
-      : 'Voice: iPhone default. For your usual high-quality voice, tap Speak Screen at the top of the reading page.';
+      : 'Voice: iPhone default.';
   }
 
   // ---------- Keeping the screen awake ----------
@@ -1412,7 +1382,6 @@
   // If you switch away and come back, iPhone drops the "stay awake" request, and may stop the voice.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    if (currentView() === 'speakView') { keepAwake(true); return; }
     if (!playing) return;
     keepAwake(true);
     setTimeout(() => {
@@ -1453,7 +1422,7 @@
   // ---------- Pinch the text to resize it (and remember the size) ----------
   // Normally a pinch zooms the whole page, buttons and all, and iPhone forgets it when you leave.
   // Here a two-finger pinch on a reading page changes the text size instead, and saves it.
-  const onReadingPage = () => cur && (currentView() === 'readerView' || currentView() === 'speakView')
+  const onReadingPage = () => cur && currentView() === 'readerView'
     && $('sheetWrap').hidden && $('noteWrap').hidden && $('listWrap').hidden;
   const fingerGap = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   let pinch = null; // {gap, size, live}
@@ -1489,41 +1458,6 @@
   }
   function closeSheet() { $('sheetWrap').hidden = true; }
 
-  // ---------- Speak Screen view ----------
-  // Shows only the unread part, so the iPhone's own Speak Screen (your usual voice) starts at your spot.
-  // The screen stays awake here, and your spot follows the page as Speak Screen scrolls it.
-  let speakTimer = 0;
-  function openSpeakView() {
-    stop();
-    closeSheet();
-    renderSentences($('speakText'), Math.min(cur.pos, sents.length - 1));
-    show('speakView');
-    keepAwake(true);
-    toast('Swipe down from the top with two fingers to start Speak Screen.', 6000);
-  }
-  // Saves the first sentence still showing at the top of the screen as your spot.
-  function trackSpeakScroll() {
-    clearTimeout(speakTimer);
-    speakTimer = setTimeout(() => {
-      if (currentView() !== 'speakView' || !cur) return;
-      const top = document.querySelector('#speakView .topbar').getBoundingClientRect().bottom;
-      for (const el of $('speakText').querySelectorAll('.s')) {
-        if (el.getBoundingClientRect().bottom > top + 4) {
-          cur.pos = +el.dataset.i;
-          savePos();
-          return;
-        }
-      }
-    }, 300);
-  }
-  function closeSpeakView() {
-    clearTimeout(speakTimer);
-    keepAwake(false);
-    renderSentences($('readerText'), 0);
-    show('readerView');
-    updateProgress();
-    scrollToCurrent(false, true);
-  }
 
   // ---------- Wiring up the buttons ----------
   $('pasteBtn').addEventListener('click', pasteFromClipboard);
@@ -1648,18 +1582,6 @@
     savePos();
     $('readerTitle').textContent = cur.title;
   });
-
-  $('speakViewBtn').addEventListener('click', openSpeakView);
-  $('speakText').addEventListener('click', (e) => {
-    const s = e.target.closest('.s');
-    if (!s) return;
-    cur.pos = +s.dataset.i;
-    savePos();
-    for (const el of $('speakText').querySelectorAll('.s.now')) el.classList.remove('now');
-    s.classList.add('now');
-    toast('Spot saved.');
-  });
-  $('speakDone').addEventListener('click', closeSpeakView);
 
   // Voices load a moment after the page opens on iPhone.
   if (synth && 'onvoiceschanged' in synth) {
