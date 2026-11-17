@@ -29,6 +29,9 @@
     --danger: #a3302a;
     --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06);
     --read-size: 21px;      /* reading text size; changed by the A- / A+ buttons */
+    --hl-yellow: #ffd43b;   /* your highlight colors (stronger than the pale "now reading" yellow) */
+    --hl-blue: #bfe0ff;
+    --hl-red: #ffc4c0;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
@@ -43,6 +46,9 @@
       --hilite: #5a4a12;
       --danger: #ef8a83;
       --shadow: 0 1px 2px rgba(0,0,0,.4);
+      --hl-yellow: #7a6400;
+      --hl-blue: #1d4870;
+      --hl-red: #6d2a26;
     }
   }
 
@@ -163,6 +169,54 @@
   .s.now { background: var(--hilite); box-shadow: 0 0 0 3px var(--hilite); }
   .s.done { color: var(--muted); }
 
+  /* ---------- Your highlights and notes ---------- */
+  .hl { color: inherit; border-radius: 3px; padding: 1px 0; }
+  .hl-yellow { background: var(--hl-yellow); }
+  .hl-blue { background: var(--hl-blue); }
+  .hl-red { background: var(--hl-red); }
+  /* A highlight inside the sentence being read gets a teal underline, so you can still see where it's reading */
+  .s.now .hl { box-shadow: inset 0 -3px 0 var(--accent); }
+  .note-ic { display: inline-block; width: .85em; height: .85em; margin: 0 2px 0 4px; color: var(--accent); vertical-align: -0.05em; }
+  .note-ic svg { display: block; width: 100%; height: 100%; }
+
+  /* The small bar that pops up when you select text */
+  .mark-bar {
+    position: fixed; left: 50%; transform: translateX(-50%); z-index: 8;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 28px;
+    background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow);
+    white-space: nowrap;
+  }
+  .mk-dot { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--line); padding: 0; }
+  .mk-dot[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--surface) inset; }
+  .mk-btn {
+    flex: none; height: 40px; padding: 0 14px; border-radius: 20px;
+    border: 1px solid var(--line); background: var(--bg); font-size: 15px; font-weight: 600;
+  }
+  .quote {
+    margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--bg);
+    font-family: ui-serif, "New York", Georgia, serif; font-size: 17px;
+    max-height: 30vh; overflow-y: auto; overflow-wrap: anywhere;
+  }
+  .note-text {
+    width: 100%; min-height: 110px; padding: 12px; font-size: 16px; /* 16px stops iPhone zooming in on the box */
+    border: 1px solid var(--line); border-radius: 12px; background: var(--bg); resize: vertical;
+  }
+  .dots { display: flex; gap: 12px; align-items: center; }
+  .danger-btn { color: var(--danger); }
+  .mark-list { list-style: none; margin: 0; padding: 0; }
+  .mark-row {
+    display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 12px;
+    width: 100%; padding: 12px 0; text-align: left;
+    background: none; border: 0; border-bottom: 1px solid var(--line);
+  }
+  .mark-row > i { width: 14px; height: 14px; border-radius: 50%; margin-top: 6px; }
+  .mark-q {
+    font-family: ui-serif, "New York", Georgia, serif; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .mark-n { margin-top: 4px; color: var(--muted); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
   /* ---------- Bottom controls: small, and they slide away ---------- */
   .controls {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
@@ -200,6 +254,9 @@
   @media (max-width: 380px) {
     .transport-mid { gap: 10px; }
     .chip { min-width: 48px; padding: 0 6px; }
+    .mark-bar { gap: 6px; padding: 5px 6px; }
+    .mk-dot { width: 36px; height: 36px; }
+    .mk-btn { padding: 0 10px; }
   }
 
   /* Small tab that brings the controls back when they're hidden */
@@ -317,6 +374,15 @@
     Back to reading spot
   </button>
 
+  <!-- Pops up when you select text: pick a color, add a note, or remove highlighting -->
+  <div id="markBar" class="mark-bar" role="toolbar" aria-label="Highlight" hidden>
+    <button class="mk-dot hl-yellow" type="button" data-c="yellow" aria-label="Yellow highlight"></button>
+    <button class="mk-dot hl-blue" type="button" data-c="blue" aria-label="Blue highlight"></button>
+    <button class="mk-dot hl-red" type="button" data-c="red" aria-label="Red highlight"></button>
+    <button class="mk-btn" type="button" data-act="note">Note</button>
+    <button id="markRemove" class="mk-btn" type="button" data-act="remove">Remove</button>
+  </div>
+
   <div id="controls" class="controls">
     <div class="controls-inner">
       <button id="grabber" class="grabber" type="button" aria-label="Hide controls"><span></span></button>
@@ -381,7 +447,41 @@
       </div>
     </div>
 
+    <button id="marksBtn" class="btn-secondary" type="button">Highlights and notes</button>
     <button id="renameBtn" class="btn-secondary" type="button">Rename this document</button>
+  </div>
+</div>
+
+<!-- ===================== Note pop-up (tap a highlight) ===================== -->
+<div id="noteWrap" class="sheet-wrap" hidden>
+  <button id="noteBackdrop" class="backdrop" type="button" aria-label="Save and close note"></button>
+  <div class="sheet" role="dialog" aria-label="Note">
+    <div class="sheet-head">
+      <h2>Note</h2>
+      <button id="noteDone" class="sheet-done" type="button">Save</button>
+    </div>
+    <blockquote id="noteQuote" class="quote"></blockquote>
+    <textarea id="noteText" class="note-text" placeholder="Tap here to type a note (optional)"></textarea>
+    <div id="noteDots" class="dots" role="group" aria-label="Highlight color">
+      <button class="mk-dot hl-yellow" type="button" data-c="yellow" aria-label="Yellow"></button>
+      <button class="mk-dot hl-blue" type="button" data-c="blue" aria-label="Blue"></button>
+      <button class="mk-dot hl-red" type="button" data-c="red" aria-label="Red"></button>
+    </div>
+    <button id="noteRemove" class="btn-secondary danger-btn" type="button">Remove highlight</button>
+  </div>
+</div>
+
+<!-- ===================== Highlights and notes list ===================== -->
+<div id="listWrap" class="sheet-wrap" hidden>
+  <button id="listBackdrop" class="backdrop" type="button" aria-label="Close list"></button>
+  <div class="sheet" role="dialog" aria-label="Highlights and notes">
+    <div class="sheet-head">
+      <h2>Highlights and notes</h2>
+      <button id="listDone" class="sheet-done" type="button">Done</button>
+    </div>
+    <ul id="markList" class="mark-list"></ul>
+    <p id="markEmpty" class="hint" hidden>No highlights yet. Touch and hold a word, drag the handles to cover what you want, then pick a color.</p>
+    <button id="copyAll" class="btn-secondary" type="button">Copy all</button>
   </div>
 </div>
 
@@ -546,6 +646,8 @@
       meta.textContent = pct >= 100
         ? 'Finished · saved ' + fmtDate(d.created)
         : pct + '% read · ' + minutesLabel(countWords(d.text) * (1 - frac));
+      const nMarks = (d.marks || []).length;
+      if (nMarks) meta.textContent += ' · ' + nMarks + (nMarks === 1 ? ' highlight' : ' highlights');
       const bar = document.createElement('div');
       bar.className = 'bar';
       const fill = document.createElement('i');
@@ -619,6 +721,10 @@
 
   function openDoc(id) {
     stop();
+    $('noteWrap').hidden = true;
+    $('listWrap').hidden = true;
+    $('markBar').hidden = true;
+    noteId = null;
     cur = docs.find(d => d.id === id);
     if (!cur) return;
     sents = toSentences(cur.text);
@@ -635,8 +741,10 @@
   }
 
   // Builds the text as paragraphs of tappable sentences, starting at sentence `from`.
+  // Your highlights are painted in as it goes; the sentence text itself is never changed.
   function renderSentences(container, from) {
     container.textContent = '';
+    const idx = markIndex();
     let p = null, lastPara = -1;
     for (let i = from; i < sents.length; i++) {
       if (sents[i].p !== lastPara) {
@@ -649,9 +757,260 @@
       const span = document.createElement('span');
       span.className = 's';
       span.dataset.i = i;
-      span.textContent = sents[i].t;
+      fillSentence(span, sents[i].t, idx.get(i));
       p.appendChild(span);
     }
+  }
+
+  // ---------- Highlights and notes ----------
+  // Each highlight is saved with its document as {id, s, a, e, b, c, note, q}:
+  // it starts at sentence s, character a, and ends at sentence e, character b (end not included).
+  // c = color, note = your note, q = the highlighted words (kept so the list can always show them).
+  // marksFor = how many sentences the document had when the highlights were made. If a later
+  // version of the app ever splits the text differently, the highlights stay in the list
+  // but are not painted, so they can never land on the wrong words.
+  const byPos = (x, y) => cmp(x.s, x.a, y.s, y.a);
+  function cmp(s1, a1, s2, a2) { return (s1 - s2) || (a1 - a2); }
+  const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const marksOk = () => !!cur && (!cur.marks || !cur.marks.length || cur.marksFor === sents.length);
+
+  // The words between two points, the same way they read on screen.
+  function sliceText(s, a, e, b) {
+    if (s === e) return sents[s].t.slice(a, b);
+    const parts = [sents[s].t.slice(a)];
+    for (let i = s + 1; i < e; i++) parts.push(sents[i].t);
+    parts.push(sents[e].t.slice(0, b));
+    return parts.join(' ').trim();
+  }
+
+  // Tidies a highlight's edges (no empty slivers at either end) and refreshes its words. null = nothing left.
+  function norm(m) {
+    if (m.b === 0 && m.e > m.s) { m.e--; m.b = sents[m.e].t.length; }
+    if (m.a >= sents[m.s].t.length && m.s < m.e) { m.s++; m.a = 0; }
+    if (cmp(m.s, m.a, m.e, m.b) >= 0) return null;
+    m.q = sliceText(m.s, m.a, m.e, m.b);
+    return m.q ? m : null;
+  }
+
+  // Cuts the stretch r out of every saved highlight (a new highlight replaces what it covers).
+  // Returns the notes of highlights that were covered completely, so a re-colored highlight keeps its note.
+  function carve(r) {
+    const kept = [], notes = [];
+    for (const m of cur.marks || []) {
+      if (cmp(m.e, m.b, r.s, r.a) <= 0 || cmp(r.e, r.b, m.s, m.a) <= 0) { kept.push(m); continue; } // doesn't touch
+      const left = cmp(m.s, m.a, r.s, r.a) < 0 ? norm({ ...m, e: r.s, b: r.a }) : null;
+      const right = cmp(r.e, r.b, m.e, m.b) < 0 ? norm({ ...m, id: newId(), s: r.e, a: r.b, note: left ? '' : m.note }) : null;
+      if (left) kept.push(left);
+      if (right) kept.push(right);
+      if (!left && !right && m.note) notes.push(m.note);
+    }
+    cur.marks = kept;
+    return notes;
+  }
+
+  function addMark(r, c) {
+    const notes = carve(r);
+    const m = norm({ id: newId(), s: r.s, a: r.a, e: r.e, b: r.b, c, note: notes.join('\n') });
+    if (m) cur.marks.push(m);
+    saveMarks();
+    return m;
+  }
+  function removeMarksIn(r) { carve(r); saveMarks(); }
+  const overlapsAny = (r) => (cur.marks || []).some(m => cmp(m.e, m.b, r.s, r.a) > 0 && cmp(r.e, r.b, m.s, m.a) > 0);
+  const findMark = (id) => (cur && cur.marks || []).find(m => m.id === id);
+
+  // Saves, then redraws the page so the change shows.
+  function saveMarks() {
+    cur.marks.sort(byPos);
+    cur.marksFor = sents.length;
+    savePos();
+    renderSentences($('readerText'), 0);
+    updateProgress();
+  }
+
+  // For each sentence, the highlighted pieces inside it: Map(sentence -> [{from, to, m}]).
+  function markIndex() {
+    const idx = new Map();
+    if (!cur || !cur.marks || !marksOk()) return idx;
+    for (const m of cur.marks) {
+      for (let i = m.s; i <= m.e && i < sents.length; i++) {
+        const from = i === m.s ? m.a : 0;
+        const to = i === m.e ? m.b : sents[i].t.length;
+        if (to <= from) continue;
+        if (!idx.has(i)) idx.set(i, []);
+        idx.get(i).push({ from, to, m });
+      }
+    }
+    for (const list of idx.values()) list.sort((x, y) => x.from - y.from);
+    return idx;
+  }
+
+  // Puts one sentence's text into its span, wrapping highlighted pieces in <mark>.
+  // A highlight with a note gets a small note icon right after its last word.
+  function fillSentence(span, t, pieces) {
+    if (!pieces) { span.textContent = t; return; }
+    const i = +span.dataset.i;
+    let at = 0;
+    for (const pc of pieces) {
+      if (pc.from > at) span.appendChild(document.createTextNode(t.slice(at, pc.from)));
+      const mk = document.createElement('mark');
+      mk.className = 'hl hl-' + pc.m.c;
+      mk.dataset.m = pc.m.id;
+      mk.textContent = t.slice(pc.from, pc.to);
+      span.appendChild(mk);
+      if (pc.m.note && pc.m.e === i) span.appendChild(noteIcon(pc.m.id));
+      at = pc.to;
+    }
+    if (at < t.length) span.appendChild(document.createTextNode(t.slice(at)));
+  }
+  // aria-hidden keeps Speak Screen from saying anything for the icon; tapping the highlight opens the note too.
+  function noteIcon(id) {
+    const el = document.createElement('span');
+    el.className = 'note-ic';
+    el.dataset.m = id;
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z" fill="currentColor" opacity=".2"/><path d="M5 3h10l4 4v14H5zM9 11h6M9 15h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+    return el;
+  }
+
+  // Turns a point in the page (from a text selection) into {i: sentence, o: character}.
+  // A point between sentences snaps forward for the start of a selection, backward for the end.
+  function selPoint(node, off, isEnd) {
+    const r = document.createRange();
+    let pick = null;
+    for (const span of $('readerText').querySelectorAll('.s')) {
+      const i = +span.dataset.i;
+      r.selectNodeContents(span);
+      const c = r.comparePoint(node, off);
+      if (c === 0) {
+        const pre = document.createRange();
+        pre.setStart(span, 0);
+        pre.setEnd(node, off);
+        return { i, o: Math.min(pre.toString().length, sents[i].t.length) };
+      }
+      if (!isEnd && c < 0) return { i, o: 0 };
+      if (isEnd && c > 0) pick = { i, o: sents[i].t.length };
+      if (isEnd && c < 0) break;
+    }
+    return pick;
+  }
+  // What's selected in the reading text right now, as {s, a, e, b}, or null.
+  function readSelection() {
+    if (currentView() !== 'readerView' || !marksOk()) return null;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const rng = sel.getRangeAt(0);
+    const box = $('readerText');
+    if (!box.contains(rng.startContainer) || !box.contains(rng.endContainer)) return null;
+    const a = selPoint(rng.startContainer, rng.startOffset, false);
+    const b = selPoint(rng.endContainer, rng.endOffset, true);
+    if (!a || !b || cmp(a.i, a.o, b.i, b.o) >= 0) return null;
+    const r = { s: a.i, a: a.o, e: b.i, b: b.o };
+    return norm({ ...r }) ? r : null;
+  }
+
+  // The selection bar: shows while text is selected. iPhone may clear the selection the moment
+  // a button is touched, so the bar acts on touch-down and keeps the last selection it saw.
+  let selTimer = 0, hadSel = false, selClearedAt = 0, pendingSel = null;
+  document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection();
+    const has = !!sel && !sel.isCollapsed;
+    if (hadSel && !has) selClearedAt = Date.now();
+    hadSel = has;
+    clearTimeout(selTimer);
+    selTimer = setTimeout(updateMarkBar, 150);
+  });
+  function updateMarkBar() {
+    const r = readSelection();
+    pendingSel = r;
+    const bar = $('markBar');
+    bar.hidden = !r;
+    if (r) {
+      $('markRemove').hidden = !overlapsAny(r);
+      bar.style.bottom = (window.innerHeight - visibleStrip().bottom + 12) + 'px';
+    }
+    updatePill();
+  }
+  function markBarAction(btn) {
+    const r = readSelection() || pendingSel;
+    if (!r || !cur) return;
+    window.getSelection().removeAllRanges();
+    $('markBar').hidden = true;
+    pendingSel = null;
+    if (btn.dataset.c) { addMark(r, btn.dataset.c); return; }
+    if (btn.dataset.act === 'remove') { removeMarksIn(r); return; }
+    // Note: inside one highlight already? Open its note. Otherwise make a yellow one and open that.
+    const inside = (cur.marks || []).find(m => cmp(m.s, m.a, r.s, r.a) <= 0 && cmp(r.e, r.b, m.e, m.b) <= 0);
+    const m = inside || addMark(r, 'yellow');
+    if (m) openNote(m.id);
+  }
+
+  // ---------- Note pop-up ----------
+  let noteId = null;
+  function showDots(c) {
+    for (const d of $('noteDots').querySelectorAll('.mk-dot')) d.setAttribute('aria-pressed', String(d.dataset.c === c));
+  }
+  function openNote(id) {
+    const m = findMark(id);
+    if (!m) return;
+    noteId = id;
+    $('noteQuote').textContent = m.q;
+    $('noteText').value = m.note || '';
+    showDots(m.c);
+    $('noteWrap').hidden = false;
+  }
+  // The note is kept as you type (and saved if the app closes), so closing always saves.
+  function closeNote() {
+    if ($('noteWrap').hidden) return;
+    $('noteText').blur();
+    $('noteWrap').hidden = true;
+    const m = findMark(noteId);
+    noteId = null;
+    if (m) saveMarks();
+  }
+
+  // ---------- Highlights and notes list ----------
+  function openList() {
+    closeSheet();
+    const ul = $('markList');
+    ul.textContent = '';
+    const marks = (cur.marks || []).slice().sort(byPos);
+    for (const m of marks) {
+      const li = document.createElement('li');
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'mark-row';
+      const dot = document.createElement('i');
+      dot.className = 'hl-' + m.c;
+      const body = document.createElement('div');
+      const q = document.createElement('div');
+      q.className = 'mark-q';
+      q.textContent = m.q;
+      body.appendChild(q);
+      if (m.note) {
+        const n = document.createElement('div');
+        n.className = 'mark-n';
+        n.textContent = m.note;
+        body.appendChild(n);
+      }
+      row.append(dot, body);
+      row.addEventListener('click', () => { $('listWrap').hidden = true; jumpTo(m.s); });
+      li.appendChild(row);
+      ul.appendChild(li);
+    }
+    $('markEmpty').hidden = marks.length > 0;
+    $('copyAll').hidden = marks.length === 0;
+    $('listWrap').hidden = false;
+  }
+  // Plain text for pasting into an email or Notes.
+  function marksAsText() {
+    const lines = [cur.title, ''];
+    for (const m of (cur.marks || []).slice().sort(byPos)) {
+      lines.push('“' + m.q + '”');
+      if (m.note) lines.push('Note: ' + m.note);
+      lines.push('');
+    }
+    return lines.join('\n').trim();
   }
 
   function updateProgress() {
@@ -717,7 +1076,8 @@
     const strip = visibleStrip();
     const above = r && r.bottom < strip.top + 4;
     const below = r && r.top > strip.bottom - 4;
-    pill.hidden = !(above || below) || Date.now() < autoScrollUntil;
+    // Hidden while the highlight bar is up (they'd sit in the same spot).
+    pill.hidden = !(above || below) || Date.now() < autoScrollUntil || !$('markBar').hidden;
     if (!pill.hidden) {
       $('spotArrow').style.transform = above ? 'rotate(180deg)' : '';
       pill.style.bottom = (window.innerHeight - strip.bottom + 12) + 'px';
@@ -794,8 +1154,9 @@
       seen.add(key);
       return true;
     });
-    const good = unique.filter(v => tier(v) >= 2);
-    return good.length >= 2 ? good.slice(0, 6) : unique.slice(0, 4);
+    // Only Enhanced or Premium voices. The basic ones sound robotic, and "iPhone default voice"
+    // (always offered first) already sounds better on Gary's phone.
+    return unique.filter(v => tier(v) >= 2).slice(0, 6);
   }
   function voiceLabel(v) {
     const t = tier(v);
@@ -829,9 +1190,11 @@
       o.selected = !!chosen && v.voiceURI === chosen.voiceURI;
       sel.appendChild(o);
     }
-    $('voiceNote').textContent = list.some(v => tier(v) >= 2)
+    // No good voices offered: hide the picker. The iPhone default voice is used.
+    sel.hidden = list.length === 0;
+    $('voiceNote').textContent = list.length
       ? ''
-      : 'iPhone only gave this app its basic voices. For your usual high-quality voice, tap Speak Screen at the top of the reading page.';
+      : 'Voice: iPhone default. For your usual high-quality voice, tap Speak Screen at the top of the reading page.';
   }
 
   // ---------- Keeping the screen awake ----------
@@ -989,7 +1352,8 @@
   // ---------- Pinch the text to resize it (and remember the size) ----------
   // Normally a pinch zooms the whole page, buttons and all, and iPhone forgets it when you leave.
   // Here a two-finger pinch on a reading page changes the text size instead, and saves it.
-  const onReadingPage = () => cur && (currentView() === 'readerView' || currentView() === 'speakView') && $('sheetWrap').hidden;
+  const onReadingPage = () => cur && (currentView() === 'readerView' || currentView() === 'speakView')
+    && $('sheetWrap').hidden && $('noteWrap').hidden && $('listWrap').hidden;
   const fingerGap = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   let pinch = null; // {gap, size, live}
   document.addEventListener('touchstart', (e) => {
@@ -1015,7 +1379,13 @@
   }
 
   // ---------- Options pop-up ----------
-  function openSheet() { fillVoices(); showRate(); $('sheetWrap').hidden = false; }
+  function openSheet() {
+    fillVoices();
+    showRate();
+    const n = (cur && cur.marks || []).length;
+    $('marksBtn').textContent = 'Highlights and notes' + (n ? ' (' + n + ')' : '');
+    $('sheetWrap').hidden = false;
+  }
   function closeSheet() { $('sheetWrap').hidden = true; }
 
   // ---------- Speak Screen view ----------
@@ -1076,8 +1446,70 @@
   $('prevBtn').addEventListener('click', () => jumpTo(cur.pos - 1));
   $('nextBtn').addEventListener('click', () => jumpTo(cur.pos + 1));
   $('readerText').addEventListener('click', (e) => {
+    // Finishing or clearing a text selection is not a tap to jump.
+    const sel = window.getSelection();
+    if ((sel && !sel.isCollapsed) || Date.now() - selClearedAt < 500) return;
+    // A tap on a highlight (or its note icon) opens the note and leaves your reading spot alone.
+    const hit = e.target.closest('[data-m]');
+    if (hit) { openNote(hit.dataset.m); return; }
     const s = e.target.closest('.s');
     if (s) jumpTo(+s.dataset.i);
+  });
+  // Highlight bar: act on touch-down (see markBarAction). Keyboard presses arrive as clicks with detail 0.
+  $('markBar').addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    e.preventDefault();
+    markBarAction(btn);
+  });
+  $('markBar').addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (btn && e.detail === 0) markBarAction(btn);
+  });
+
+  // Note pop-up
+  $('noteText').addEventListener('input', (e) => {
+    const m = findMark(noteId);
+    if (m) m.note = e.target.value.trim();
+  });
+  $('noteDone').addEventListener('click', closeNote);
+  $('noteBackdrop').addEventListener('click', closeNote);
+  $('noteDots').addEventListener('click', (e) => {
+    const d = e.target.closest('.mk-dot');
+    const m = findMark(noteId);
+    if (!d || !m) return;
+    m.c = d.dataset.c;
+    showDots(m.c);
+    saveMarks();
+  });
+  $('noteRemove').addEventListener('click', () => {
+    const id = noteId;
+    $('noteWrap').hidden = true;
+    noteId = null;
+    cur.marks = (cur.marks || []).filter(m => m.id !== id);
+    saveMarks();
+  });
+  // When the keyboard opens, keep the note pop-up inside the part of the screen you can see.
+  if (window.visualViewport) {
+    const fitNote = () => {
+      $('noteWrap').style.top = visualViewport.offsetTop + 'px';
+      $('noteWrap').style.height = visualViewport.height + 'px';
+    };
+    visualViewport.addEventListener('resize', fitNote);
+    visualViewport.addEventListener('scroll', fitNote);
+  }
+
+  // Highlights and notes list
+  $('marksBtn').addEventListener('click', openList);
+  $('listDone').addEventListener('click', () => { $('listWrap').hidden = true; });
+  $('listBackdrop').addEventListener('click', () => { $('listWrap').hidden = true; });
+  $('copyAll').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(marksAsText());
+      toast('Copied. Paste it into an email or Notes.');
+    } catch (e) {
+      toast('Couldn’t copy. Try again.');
+    }
   });
   $('spotPill').addEventListener('click', () => scrollToCurrent(true, true));
 
@@ -1147,7 +1579,8 @@
   // Test handle (used when checking the app on a computer).
   window.RL = {
     state: () => ({ view: currentView(), playing, pos: cur && cur.pos, total: sents.length, docs: docs.length, follow, collapsed: isCollapsed() }),
-    addDoc, openDoc, toSentences, speakable, shortlist, voiceLabel
+    addDoc, openDoc, toSentences, speakable, shortlist, voiceLabel,
+    marks: () => cur && cur.marks, addMark, readSelection, sliceText, marksAsText, openNote
   };
 })();
 </script>
