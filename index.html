@@ -62,6 +62,7 @@
   /* Each screen fills the phone; padding keeps clear of the notch and home bar */
   .view {
     min-height: 100%;
+    overflow-x: clip; /* backstop: nothing may make the page wider than the phone (that made iPhone zoom everything out) */
     padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px);
     max-width: 680px;
     margin: 0 auto;
@@ -154,6 +155,7 @@
   .reading {
     font-family: ui-serif, "New York", Georgia, serif;
     font-size: var(--read-size); line-height: 1.6;
+    overflow-wrap: anywhere; /* long web addresses wrap instead of pushing the page wider than the screen */
     padding: 16px 0 260px; /* bottom room so the last lines can scroll above the controls */
   }
   .reading p { margin: 0 0 1em; }
@@ -194,6 +196,11 @@
     font-size: 15px; font-weight: 600;
   }
   .chip svg { width: 22px; height: 22px; }
+  /* Small phones: tighten the bottom row so it never runs off the right edge */
+  @media (max-width: 380px) {
+    .transport-mid { gap: 10px; }
+    .chip { min-width: 48px; padding: 0 6px; }
+  }
 
   /* Small tab that brings the controls back when they're hidden */
   .show-controls {
@@ -367,7 +374,7 @@
     </div>
 
     <div class="field">
-      <span class="field-label">Text size</span>
+      <span class="field-label">Text size (or pinch the text with two fingers)</span>
       <div class="row">
         <button id="sizeDown" class="btn-secondary" type="button" aria-label="Smaller text">A&minus;</button>
         <button id="sizeUp" class="btn-secondary" type="button" aria-label="Bigger text">A+</button>
@@ -969,11 +976,42 @@
   }
 
   // ---------- Text size ----------
-  function setSize(px) {
-    prefs.size = Math.max(17, Math.min(33, px));
-    savePrefs();
+  // Changes only the reading text (never the buttons). save = false while a pinch is still moving.
+  const MIN_SIZE = 15, MAX_SIZE = 44;
+  function setSize(px, save = true) {
+    prefs.size = Math.round(Math.max(MIN_SIZE, Math.min(MAX_SIZE, px)));
     document.documentElement.style.setProperty('--read-size', prefs.size + 'px');
+    if (!save) return;
+    savePrefs();
     if (cur && currentView() === 'readerView') scrollToCurrent(false, true);
+  }
+
+  // ---------- Pinch the text to resize it (and remember the size) ----------
+  // Normally a pinch zooms the whole page, buttons and all, and iPhone forgets it when you leave.
+  // Here a two-finger pinch on a reading page changes the text size instead, and saves it.
+  const onReadingPage = () => cur && (currentView() === 'readerView' || currentView() === 'speakView') && $('sheetWrap').hidden;
+  const fingerGap = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  let pinch = null; // {gap, size, live}
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2 && onReadingPage()) pinch = { gap: fingerGap(e.touches), size: prefs.size, live: false };
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault(); // stop the page itself from zooming
+    const ratio = fingerGap(e.touches) / pinch.gap;
+    if (!pinch.live && Math.abs(ratio - 1) < 0.08) return; // ignore tiny wobbles (for example a two-finger swipe)
+    pinch.live = true;
+    setSize(pinch.size * ratio, false);
+  }, { passive: false });
+  document.addEventListener('touchend', (e) => {
+    if (!pinch || e.touches.length >= 2) return;
+    const changed = pinch.live;
+    pinch = null;
+    if (changed) { setSize(prefs.size, true); toast('Text size ' + prefs.size + ' saved.', 1500); }
+  }, { passive: true });
+  // Safari's own pinch-zoom events: block them so the page never zooms out and shrinks the buttons.
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
   }
 
   // ---------- Options pop-up ----------
