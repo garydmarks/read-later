@@ -28,6 +28,7 @@
     --hilite: #fde8a8;      /* the sentence being read */
     --danger: #a3302a;
     --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06);
+    --read-size: 21px;      /* reading text size; changed by the A- / A+ buttons */
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
@@ -55,7 +56,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   button, select, textarea, input { font: inherit; color: inherit; }
-  button { cursor: pointer; }
+  button { cursor: pointer; touch-action: manipulation; }
   [hidden] { display: none !important; }
 
   /* Each screen fills the phone; padding keeps clear of the notch and home bar */
@@ -92,7 +93,8 @@
     border: 1px solid var(--line); border-radius: 12px;
     background: var(--surface); resize: vertical; font-size: 16px;
   }
-  .manual .row { display: flex; gap: 12px; margin-top: 8px; }
+  .row { display: flex; gap: 12px; }
+  .manual .row { margin-top: 8px; }
   .btn-secondary {
     flex: 1; min-height: 48px; border-radius: 12px;
     border: 1px solid var(--line); background: var(--surface); font-weight: 600;
@@ -113,7 +115,8 @@
   }
   .doc-title { font-weight: 600; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .doc-meta { color: var(--muted); font-size: 14px; margin-top: 2px; }
-  .bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+  .bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .doc .bar { margin-top: 10px; }
   .bar > i { display: block; height: 100%; background: var(--accent); }
   .doc-del {
     width: 56px; border: 0; border-left: 1px solid var(--line);
@@ -124,78 +127,137 @@
   .empty { color: var(--muted); padding: 16px 0; font-size: 16px; }
   .danger-link { color: var(--danger); margin-top: 24px; }
 
-  /* ---------- Reader screen ---------- */
+  /* ---------- Top bar (reader and Speak Screen views) ---------- */
   .topbar {
     position: sticky; top: 0; z-index: 5;
     display: flex; align-items: center; gap: 8px;
     margin: calc(-1 * (env(safe-area-inset-top) + 16px)) -16px 0;
-    padding: calc(env(safe-area-inset-top) + 8px) 8px 8px;
+    padding: calc(env(safe-area-inset-top) + 6px) 8px 6px;
     background: var(--bg); border-bottom: 1px solid var(--line);
   }
   .back {
     display: flex; align-items: center; gap: 2px;
     background: none; border: 0; color: var(--accent); font-size: 17px; padding: 8px; flex: none;
+    min-width: 44px; min-height: 44px;
   }
-  .back svg { width: 22px; height: 22px; }
-  .topbar-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .back svg { width: 26px; height: 26px; }
+  .topbar-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .top-action {
+    flex: none; display: flex; align-items: center; gap: 6px;
+    min-height: 40px; padding: 0 12px; border-radius: 20px;
+    border: 1px solid var(--line); background: var(--surface);
+    color: var(--accent); font-size: 15px; font-weight: 600;
+  }
+  .top-action svg { width: 20px; height: 20px; }
 
-  /* The text being read: a comfortable serif, big enough at arm's length */
+  /* ---------- The text being read ---------- */
   .reading {
     font-family: ui-serif, "New York", Georgia, serif;
-    font-size: 21px; line-height: 1.6;
-    padding: 16px 0 300px; /* bottom room so the last lines can scroll above the controls */
+    font-size: var(--read-size); line-height: 1.6;
+    padding: 16px 0 260px; /* bottom room so the last lines can scroll above the controls */
   }
   .reading p { margin: 0 0 1em; }
   .s { border-radius: 4px; padding: 1px 0; }
   .s.now { background: var(--hilite); box-shadow: 0 0 0 3px var(--hilite); }
   .s.done { color: var(--muted); }
 
+  /* ---------- Bottom controls: small, and they slide away ---------- */
   .controls {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
     background: var(--surface); border-top: 1px solid var(--line);
-    padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+    padding: 0 16px calc(env(safe-area-inset-bottom) + 8px);
+    transition: transform .25s ease;
+    touch-action: none; /* a swipe on the bar hides it instead of scrolling the page */
   }
+  .collapsed .controls { transform: translateY(100%); }
   .controls-inner { max-width: 680px; margin: 0 auto; }
-  .progress-text { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
-  .controls .bar { margin: 6px 0 10px; }
-  .transport { display: flex; align-items: center; justify-content: center; gap: 28px; }
+  .grabber {
+    display: block; width: 100%; height: 22px; padding: 0; border: 0; background: none;
+  }
+  .grabber span { display: block; width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto; }
+  .progress-text { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 6px 0 8px; }
+  .transport { display: flex; align-items: center; justify-content: space-between; }
+  .transport-mid { display: flex; align-items: center; gap: 18px; }
   .round {
-    width: 56px; height: 56px; border-radius: 50%;
+    width: 48px; height: 48px; border-radius: 50%;
     border: 1px solid var(--line); background: var(--bg);
     display: flex; align-items: center; justify-content: center;
   }
-  .round svg { width: 26px; height: 26px; }
-  .round.big { width: 76px; height: 76px; background: var(--accent); color: var(--accent-ink); border: 0; }
-  .round.big svg { width: 34px; height: 34px; }
-  .round:active { transform: scale(.95); }
-  .extras { display: flex; justify-content: space-between; margin-top: 6px; }
-  .awake-note { text-align: center; font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+  .round svg { width: 22px; height: 22px; }
+  .round.big { width: 64px; height: 64px; background: var(--accent); color: var(--accent-ink); border: 0; }
+  .round.big svg { width: 30px; height: 30px; }
+  .round:active, .chip:active { transform: scale(.95); }
+  .chip {
+    min-width: 60px; height: 44px; padding: 0 10px; border-radius: 22px;
+    border: 1px solid var(--line); background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 600;
+  }
+  .chip svg { width: 22px; height: 22px; }
 
+  /* Small tab that brings the controls back when they're hidden */
+  .show-controls {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom) + 12px); z-index: 6;
+    display: flex; align-items: center; gap: 6px;
+    height: 44px; padding: 0 16px; border-radius: 22px;
+    border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow);
+    font-size: 15px; font-weight: 600; color: var(--accent);
+  }
+  .show-controls svg { width: 18px; height: 18px; }
+
+  /* "Back to reading spot" appears when you've scrolled away from the highlighted sentence */
+  .spot-pill {
+    position: fixed; left: 50%; transform: translateX(-50%); z-index: 7;
+    display: flex; align-items: center; gap: 6px;
+    height: 44px; padding: 0 16px; border-radius: 22px; border: 0;
+    background: var(--ink); color: var(--bg); box-shadow: var(--shadow);
+    font-size: 15px; font-weight: 600; white-space: nowrap;
+  }
+  .spot-pill svg { width: 18px; height: 18px; }
+
+  /* ---------- Options pop-up ---------- */
+  .sheet-wrap { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; }
+  .backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.4); border: 0; padding: 0; width: 100%; }
   .sheet {
-    margin-top: 10px; padding: 12px; border-radius: 12px; background: var(--bg);
-    display: grid; gap: 12px;
-    grid-template-columns: minmax(0, 1fr); /* stops a long voice name from pushing past the screen edge */
+    position: relative; width: 100%; max-width: 680px; margin: 0 auto;
+    max-height: 88%; overflow-y: auto;
+    background: var(--surface); border-radius: 20px 20px 0 0;
+    padding: 12px 16px 16px;
+    padding-bottom: calc(env(safe-area-inset-bottom) + 16px); /* extra room above the iPhone home bar */
+    display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr);
   }
-  .sheet label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); min-width: 0; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; }
+  .sheet-head h2 { margin: 0; font-size: 19px; }
+  .sheet-done {
+    min-height: 40px; padding: 0 16px; border-radius: 20px; border: 0;
+    background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  }
+  .field { display: grid; gap: 6px; min-width: 0; }
+  .field-label { font-size: 14px; color: var(--muted); font-weight: 600; }
+  .stepper { display: flex; align-items: center; gap: 12px; }
+  .stepper input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+  .step-btn {
+    flex: none; width: 48px; height: 48px; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--bg); font-size: 20px; font-weight: 600;
+  }
   .sheet select {
-    width: 100%; min-width: 0;
-    min-height: 44px; border-radius: 10px; border: 1px solid var(--line);
-    background: var(--surface); padding: 0 8px; font-size: 16px; color: var(--ink);
+    width: 100%; min-width: 0; min-height: 48px; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--bg); padding: 0 10px; font-size: 16px; color: var(--ink);
   }
-  .sheet input[type=range] { width: 100%; accent-color: var(--accent); }
-  .sheet .hint { font-size: 13px; color: var(--muted); margin: 0; }
+  .hint { font-size: 14px; color: var(--muted); margin: 0; }
+  .sheet > .btn-secondary { width: 100%; } /* only the full-width Rename button, not the A- / A+ pair */
 
   /* ---------- Speak Screen view ---------- */
-  .speak-foot { border-top: 1px solid var(--line); padding-top: 16px; }
-  .speak-foot p { color: var(--muted); font-size: 15px; margin: 0 0 12px; }
   #speakView .reading { padding-bottom: 24px; }
+  .speak-foot { border-top: 1px solid var(--line); padding: 16px 0 60vh; color: var(--muted); font-size: 15px; }
 
   .toast {
-    position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 24px);
+    position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 64px);
     transform: translateX(-50%);
-    max-width: calc(100% - 32px);
+    width: max-content; max-width: calc(100% - 32px);
     background: var(--ink); color: var(--bg);
-    padding: 12px 16px; border-radius: 12px; font-size: 15px; z-index: 20;
+    padding: 12px 16px; border-radius: 12px; font-size: 15px; z-index: 40;
     box-shadow: var(--shadow);
   }
 </style>
@@ -230,59 +292,102 @@
 <!-- ===================== Reader ===================== -->
 <section id="readerView" class="view" hidden>
   <div class="topbar">
-    <button id="readerBack" class="back" type="button">
+    <button id="readerBack" class="back" type="button" aria-label="Back to library">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-      Library
     </button>
     <div id="readerTitle" class="topbar-title"></div>
+    <!-- One tap to the view made for the iPhone's own Speak Screen voice -->
+    <button id="speakViewBtn" class="top-action" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-5 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M8 9h8M8 12.5h5"/></svg>
+      Speak Screen
+    </button>
   </div>
+
   <div id="readerText" class="reading"></div>
 
-  <div class="controls">
+  <button id="spotPill" class="spot-pill" type="button" hidden>
+    <svg id="spotArrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+    Back to reading spot
+  </button>
+
+  <div id="controls" class="controls">
     <div class="controls-inner">
-      <div class="progress-text"><span id="posText"></span><span id="pctText"></span></div>
+      <button id="grabber" class="grabber" type="button" aria-label="Hide controls"><span></span></button>
       <div class="bar"><i id="posBar"></i></div>
-
+      <div class="progress-text"><span id="posText"></span><span id="leftText"></span></div>
       <div class="transport">
-        <button id="prevBtn" class="round" type="button" aria-label="Back one sentence">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 6h2v12H6zM20 6v12l-9-6z"/></svg>
+        <button id="speedChip" class="chip" type="button" aria-label="Change speed"></button>
+        <div class="transport-mid">
+          <button id="prevBtn" class="round" type="button" aria-label="Back one sentence">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 6h2v12H6zM20 6v12l-9-6z"/></svg>
+          </button>
+          <button id="playBtn" class="round big" type="button" aria-label="Play">
+            <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+          </button>
+          <button id="nextBtn" class="round" type="button" aria-label="Forward one sentence">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 6h2v12h-2zM4 6v12l9-6z"/></svg>
+          </button>
+        </div>
+        <button id="optsBtn" class="chip" type="button" aria-label="Voice, speed and text size">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
         </button>
-        <button id="playBtn" class="round big" type="button" aria-label="Play">
-          <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-          <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
-        </button>
-        <button id="nextBtn" class="round" type="button" aria-label="Forward one sentence">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 6h2v12h-2zM4 6v12l9-6z"/></svg>
-        </button>
-      </div>
-
-      <p id="awakeNote" class="awake-note"></p>
-
-      <div class="extras">
-        <button id="sheetToggle" class="link-btn" type="button">Voice and speed</button>
-        <button id="speakViewBtn" class="link-btn" type="button">Use Speak Screen</button>
-      </div>
-
-      <div id="sheet" class="sheet" hidden>
-        <label>Voice
-          <select id="voiceSelect"></select>
-        </label>
-        <label><span>Speed: <span id="rateText"></span></span>
-          <input id="rateInput" type="range" min="0.75" max="2" step="0.05">
-        </label>
-        <p class="hint">Want a nicer voice? On your iPhone: Settings &gt; Accessibility &gt; Spoken Content &gt; Voices. Download an "Enhanced" or "Premium" voice, then reopen this app.</p>
       </div>
     </div>
   </div>
+
+  <button id="showControls" class="show-controls" type="button" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+    Controls
+  </button>
 </section>
+
+<!-- ===================== Options pop-up ===================== -->
+<div id="sheetWrap" class="sheet-wrap" hidden>
+  <button id="backdrop" class="backdrop" type="button" aria-label="Close options"></button>
+  <div class="sheet" role="dialog" aria-label="Options">
+    <div class="sheet-head">
+      <h2>Options</h2>
+      <button id="sheetDone" class="sheet-done" type="button">Done</button>
+    </div>
+
+    <div class="field">
+      <span class="field-label">Speed: <span id="rateText"></span></span>
+      <div class="stepper">
+        <button id="rateDown" class="step-btn" type="button" aria-label="Slower">&minus;</button>
+        <input id="rateInput" type="range" min="0.5" max="2" step="0.05" aria-label="Speed">
+        <button id="rateUp" class="step-btn" type="button" aria-label="Faster">+</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label" for="voiceSelect">Voice for the Play button</label>
+      <select id="voiceSelect"></select>
+      <p id="voiceNote" class="hint"></p>
+    </div>
+
+    <div class="field">
+      <span class="field-label">Text size</span>
+      <div class="row">
+        <button id="sizeDown" class="btn-secondary" type="button" aria-label="Smaller text">A&minus;</button>
+        <button id="sizeUp" class="btn-secondary" type="button" aria-label="Bigger text">A+</button>
+      </div>
+    </div>
+
+    <button id="renameBtn" class="btn-secondary" type="button">Rename this document</button>
+  </div>
+</div>
 
 <!-- ===================== Speak Screen view ===================== -->
 <section id="speakView" class="view" hidden>
-  <div id="speakText" class="reading"></div>
-  <div class="speak-foot">
-    <p>Swipe down from the top with two fingers to start Speak Screen. When you stop, tap the sentence where you stopped, then tap Done.</p>
-    <button id="speakDone" class="btn-primary" type="button">Done</button>
+  <div class="topbar">
+    <button id="speakDone" class="back" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      Done
+    </button>
   </div>
+  <div id="speakText" class="reading"></div>
+  <div class="speak-foot">End of document.</div>
 </section>
 
 <div id="toast" class="toast" role="status" hidden></div>
@@ -294,18 +399,19 @@
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
   let toastTimer = 0;
-  function toast(msg) {
+  function toast(msg, ms) {
     const t = $('toast');
     if (!t) return;
     t.textContent = msg;
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
+    toastTimer = setTimeout(() => { t.hidden = true; }, ms || 3500);
   }
 
   // ---------- Storage (all on this phone, in the browser's storage for this page) ----------
   const DOCS_KEY = 'readlater.v1.docs';
   const PREFS_KEY = 'readlater.v1.prefs';
+  let storageBroken = false;
 
   // Reads a JSON value. A missing value means "first run"; a value we can't read is reported, never overwritten.
   function readJSON(key, fallback) {
@@ -316,8 +422,6 @@
     try { return JSON.parse(raw); }
     catch (e) { storageBroken = true; toast('Saved documents could not be read.'); return fallback; }
   }
-  let storageBroken = false;
-
   function writeJSON(key, value) {
     if (storageBroken) return false; // don't save over data we failed to read
     try { localStorage.setItem(key, JSON.stringify(value)); return true; }
@@ -325,17 +429,27 @@
   }
 
   let docs = readJSON(DOCS_KEY, []);           // [{id, title, text, total, pos, created, updated}]
-  const prefs = Object.assign({ rate: 1, voiceURI: '' }, readJSON(PREFS_KEY, {}));
+  // voiceURI: null = pick the best one automatically, '' = the iPhone's default voice
+  const prefs = Object.assign({ rate: 1, voiceURI: null, size: 21 }, readJSON(PREFS_KEY, {}));
   const saveDocs = () => writeJSON(DOCS_KEY, docs);
   const savePrefs = () => writeJSON(PREFS_KEY, prefs);
 
   // ---------- Screen switching and dates ----------
+  const VIEWS = ['libraryView', 'readerView', 'speakView'];
+  const currentView = () => VIEWS.find(id => !$(id).hidden);
   function show(viewId) {
-    for (const id of ['libraryView', 'readerView', 'speakView']) $(id).hidden = id !== viewId;
+    for (const id of VIEWS) $(id).hidden = id !== viewId;
     window.scrollTo(0, 0);
   }
   function fmtDate(ms) {
     return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  const countWords = (t) => (t.match(/\S+/g) || []).length;
+  // Rough listening time: about 175 words a minute at normal speed.
+  function minutesLabel(words) {
+    const m = words / (175 * prefs.rate);
+    if (m < 1) return 'under 1 min left';
+    return 'about ' + Math.round(m) + ' min left';
   }
 
   // ---------- Turning pasted text into paragraphs and sentences ----------
@@ -374,17 +488,29 @@
     return out;
   }
 
-  // Returns [{t: text, p: paragraph number}]
+  // Returns [{t: text, p: paragraph number, w: words in every sentence before this one}]
   function toSentences(text) {
     const result = [];
+    let words = 0;
     toParagraphs(text).forEach((para, p) => {
       const parts = segmenter
         ? Array.from(segmenter.segment(para), x => x.segment)
         : (para.match(/[^.!?]+[.!?]+["'”)]*\s*|[^.!?]+$/g) || [para]);
-      for (const part of parts) for (const c of chunk(part)) if (c) result.push({ t: c, p });
+      for (const part of parts) for (const c of chunk(part)) if (c) {
+        result.push({ t: c, p, w: words });
+        words += countWords(c);
+      }
     });
+    result.totalWords = words;
     return result;
   }
+
+  // What the voice actually says: web addresses become the word "link", and rows of
+  // dashes or underscores (email dividers) are dropped. The text on screen is not changed.
+  function speakable(t) {
+    return t.replace(/(https?:\/\/|www\.)\S+/gi, ' link ').replace(/[_=*~\-]{4,}/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  const hasWords = (t) => /[A-Za-z0-9]/.test(t);
 
   function makeTitle(text) {
     const first = text.split('\n').map(l => l.trim()).find(Boolean) || 'Untitled';
@@ -397,7 +523,8 @@
     list.textContent = '';
     const sorted = [...docs].sort((a, b) => b.updated - a.updated);
     for (const d of sorted) {
-      const pct = d.total ? Math.round((d.pos / d.total) * 100) : 0;
+      const frac = d.total ? d.pos / d.total : 0;
+      const pct = Math.round(frac * 100);
       const li = document.createElement('li');
       li.className = 'doc';
 
@@ -409,7 +536,9 @@
       title.textContent = d.title;
       const meta = document.createElement('div');
       meta.className = 'doc-meta';
-      meta.textContent = (pct >= 100 ? 'Finished' : pct + '% read') + ' · saved ' + fmtDate(d.created);
+      meta.textContent = pct >= 100
+        ? 'Finished · saved ' + fmtDate(d.created)
+        : pct + '% read · ' + minutesLabel(countWords(d.text) * (1 - frac));
       const bar = document.createElement('div');
       bar.className = 'bar';
       const fill = document.createElement('i');
@@ -440,7 +569,7 @@
   function addDoc(text) {
     const clean = text.trim();
     if (!clean) { toast('There’s no text to save. Copy something first.'); return; }
-    // Same text pasted twice in a row? Reopen it instead of making a copy.
+    // Same text pasted twice? Reopen it instead of making a copy.
     const existing = docs.find(d => d.text === clean);
     if (existing) { openDoc(existing.id); return; }
     const now = Date.now();
@@ -469,22 +598,16 @@
       toast('Couldn’t read the clipboard. Paste into the box instead.');
     }
   }
-
-  function openManual() {
-    $('manualBox').hidden = false;
-    $('manualText').focus();
-  }
-  function closeManual() {
-    $('manualBox').hidden = true;
-    $('manualText').value = '';
-  }
+  function openManual() { $('manualBox').hidden = false; $('manualText').focus(); }
+  function closeManual() { $('manualBox').hidden = true; $('manualText').value = ''; }
 
   // ---------- Reader state ----------
   let cur = null;        // the open document
   let sents = [];        // its sentences
   let playing = false;
   let token = 0;         // bumps on every start/stop so old speech events are ignored
-  let wakeLock = null;
+  let follow = true;     // true = the screen follows the sentence being read
+  let autoScrollUntil = 0; // while the app itself is scrolling, don't mistake it for your finger
   const synth = window.speechSynthesis;
 
   function openDoc(id) {
@@ -496,10 +619,12 @@
     if (cur.pos >= sents.length) cur.pos = 0; // finished? start over
     $('readerTitle').textContent = cur.title;
     renderSentences($('readerText'), 0);
-    $('sheet').hidden = true;
+    closeSheet();
+    setCollapsed(false);
+    follow = true;
     show('readerView');
     updateProgress();
-    scrollToCurrent(false);
+    scrollToCurrent(false, true);
   }
 
   // Builds the text as paragraphs of tappable sentences, starting at sentence `from`.
@@ -527,7 +652,8 @@
     const total = sents.length || 1;
     const pct = Math.round((cur.pos / total) * 100);
     $('posText').textContent = 'Sentence ' + Math.min(cur.pos + 1, total) + ' of ' + total;
-    $('pctText').textContent = pct + '%';
+    const wordsLeft = cur.pos >= sents.length ? 0 : sents.totalWords - sents[cur.pos].w;
+    $('leftText').textContent = cur.pos >= sents.length ? 'Finished' : minutesLabel(wordsLeft);
     $('posBar').style.width = pct + '%';
     for (const el of $('readerText').querySelectorAll('.s')) {
       const i = +el.dataset.i;
@@ -542,76 +668,169 @@
     saveDocs();
   }
 
-  // Leaves enough room under the text that the last lines can scroll above the controls,
-  // even when the Voice and speed panel makes the controls taller.
+  // ---------- Following the sentence being read ----------
+  const isCollapsed = () => $('readerView').classList.contains('collapsed');
+  // The strip of screen where text is actually visible: below the top bar, above the controls.
+  function visibleStrip() {
+    const top = document.querySelector('#readerView .topbar').getBoundingClientRect().bottom;
+    const bottom = isCollapsed() ? window.innerHeight - 72 : $('controls').getBoundingClientRect().top;
+    return { top, bottom };
+  }
+  function curRect() {
+    const el = cur && $('readerText').querySelector('.s[data-i="' + Math.min(cur.pos, sents.length - 1) + '"]');
+    return el ? el.getBoundingClientRect() : null;
+  }
+  // Leaves enough room under the text that the last lines can scroll above the controls.
   function fitPadding() {
-    $('readerText').style.paddingBottom = (document.querySelector('.controls').offsetHeight + 40) + 'px';
+    $('readerText').style.paddingBottom = (isCollapsed() ? 120 : $('controls').offsetHeight + 40) + 'px';
   }
 
-  // Keeps the sentence being read in the middle of the screen.
-  function scrollToCurrent(smooth) {
+  // Brings the current sentence to the middle of the visible strip.
+  // If you've scrolled away on purpose (follow = false), it leaves the screen alone unless forced.
+  function scrollToCurrent(smooth, force) {
     fitPadding();
-    const el = $('readerText').querySelector('.s[data-i="' + cur.pos + '"]');
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const topEdge = document.querySelector('#readerView .topbar').getBoundingClientRect().bottom;
-    const bottomEdge = document.querySelector('.controls').getBoundingClientRect().top;
-    if (r.top < topEdge + 10 || r.bottom > bottomEdge - 10) {
-      // Center it in the visible strip between the top bar and the controls (not the whole screen,
-      // because the controls cover the bottom part).
-      const target = (topEdge + bottomEdge) / 2;
+    if (force) follow = true;
+    const r = curRect();
+    if (!r) return;
+    const strip = visibleStrip();
+    if (follow && (r.top < strip.top + 10 || r.bottom > strip.bottom - 10)) {
+      autoScrollUntil = Date.now() + 900;
+      const target = (strip.top + strip.bottom) / 2;
       window.scrollBy({ top: (r.top + r.height / 2) - target, behavior: smooth ? 'smooth' : 'auto' });
+      setTimeout(updatePill, 950);
+    }
+    updatePill();
+  }
+
+  // Shows "Back to reading spot" when the highlighted sentence is off screen.
+  function updatePill() {
+    const pill = $('spotPill');
+    if (currentView() !== 'readerView' || !cur) { pill.hidden = true; return; }
+    const r = curRect();
+    const strip = visibleStrip();
+    const above = r && r.bottom < strip.top + 4;
+    const below = r && r.top > strip.bottom - 4;
+    pill.hidden = !(above || below) || Date.now() < autoScrollUntil;
+    if (!pill.hidden) {
+      $('spotArrow').style.transform = above ? 'rotate(180deg)' : '';
+      pill.style.bottom = (window.innerHeight - strip.bottom + 12) + 'px';
     }
   }
 
-  // ---------- Voices ----------
-  // iPhone voice IDs look like "com.apple.voice.premium.en-US.Zoe". We prefer Premium, then Enhanced.
-  function voiceRank(v) {
+  // A finger drag or mouse wheel is always you, never the app, so it ends the "app is scrolling" window at once.
+  for (const type of ['touchmove', 'wheel']) {
+    window.addEventListener(type, () => { autoScrollUntil = 0; }, { passive: true });
+  }
+
+  // Your finger scrolled the page: stop following if the spot went off screen, start again if it came back.
+  window.addEventListener('scroll', () => {
+    const view = currentView();
+    if (view === 'readerView' && cur) {
+      if (Date.now() < autoScrollUntil) return;
+      const r = curRect();
+      const strip = visibleStrip();
+      follow = !!r && r.bottom > strip.top && r.top < strip.bottom;
+      updatePill();
+    } else if (view === 'speakView' && cur) {
+      trackSpeakScroll();
+    }
+  }, { passive: true });
+
+  // ---------- Hiding and showing the controls ----------
+  function setCollapsed(on) {
+    $('readerView').classList.toggle('collapsed', on);
+    $('showControls').hidden = !on;
+    fitPadding();
+    setTimeout(updatePill, 280); // after the slide finishes
+  }
+  // Calls onDown / onUp when a finger swipes down or up on the element.
+  function onSwipe(el, onDown, onUp) {
+    let y0 = null;
+    el.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; }, { passive: true });
+    el.addEventListener('touchend', (e) => {
+      if (y0 === null) return;
+      const dy = e.changedTouches[0].clientY - y0;
+      y0 = null;
+      if (dy > 24 && onDown) onDown();
+      if (dy < -24 && onUp) onUp();
+    }, { passive: true });
+  }
+
+  // ---------- Voices: a short list of the best English ones ----------
+  // iPhone hands web apps a long list that includes joke voices and every language. We keep English,
+  // drop the joke ones, and show the best few.
+  const JOKE_ID = /eloquence|speech\.synthesis|novelty/i;
+  const JOKE_NAMES = new Set(['albert', 'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos', 'wobble', 'fred',
+    'good news', 'jester', 'junior', 'kathy', 'organ', 'ralph', 'superstar', 'trinoids', 'whisper', 'zarvox',
+    'eddy', 'flo', 'grandma', 'grandpa', 'reed', 'rocko', 'sandy', 'shelley']);
+  const LIKED = ['samantha', 'ava', 'zoe', 'allison', 'evan', 'nathan', 'tom', 'aaron', 'nicky', 'alex', 'susan', 'joelle', 'noelle', 'daniel', 'karen', 'moira'];
+  const baseName = (v) => v.name.replace(/\s*\(.*?\)\s*/g, '').trim();
+  // 3 = Premium, 2 = Enhanced, 1 = basic
+  function tier(v) {
     const id = (v.voiceURI + ' ' + v.name).toLowerCase();
-    let r = 0;
-    if (v.lang && v.lang.toLowerCase().startsWith('en')) r += 100;
-    if (v.lang === 'en-US') r += 10;
-    if (id.includes('premium')) r += 50;
-    else if (id.includes('enhanced')) r += 30;
-    if (id.includes('eloquence') || id.includes('novelty') || id.includes('superstar')) r -= 200; // joke voices
-    return r;
+    return id.includes('premium') ? 3 : id.includes('enhanced') ? 2 : 1;
+  }
+  function voiceScore(v) {
+    const liked = LIKED.indexOf(baseName(v).toLowerCase());
+    return tier(v) * 1000 + (/^en[-_]US$/i.test(v.lang) ? 100 : 0) + (liked < 0 ? 0 : LIKED.length - liked);
+  }
+  function shortlist() {
+    const all = synth ? synth.getVoices() : [];
+    const english = all.filter(v => /^en([-_]|$)/i.test(v.lang || '')
+      && !JOKE_ID.test(v.voiceURI) && !JOKE_NAMES.has(baseName(v).toLowerCase()));
+    english.sort((a, b) => voiceScore(b) - voiceScore(a) || a.name.localeCompare(b.name));
+    // One entry per name + accent (keeps the best-quality copy, which sorts first).
+    const seen = new Set();
+    const unique = english.filter(v => {
+      const key = baseName(v).toLowerCase() + '|' + v.lang;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const good = unique.filter(v => tier(v) >= 2);
+    return good.length >= 2 ? good.slice(0, 6) : unique.slice(0, 4);
   }
   function voiceLabel(v) {
-    const id = (v.voiceURI + ' ' + v.name).toLowerCase();
-    const tier = id.includes('premium') ? ' (Premium)' : id.includes('enhanced') ? ' (Enhanced)' : '';
-    return v.name.replace(/\s*\((Premium|Enhanced)\)/i, '') + tier + ' – ' + v.lang;
+    const t = tier(v);
+    const accent = /^en[-_]US$/i.test(v.lang) ? '' : ' (' + v.lang + ')';
+    return baseName(v) + (t === 3 ? ' · Premium' : t === 2 ? ' · Enhanced' : '') + accent;
   }
-  function voices() {
-    return synth ? synth.getVoices().slice().sort((a, b) => voiceRank(b) - voiceRank(a) || a.name.localeCompare(b.name)) : [];
-  }
+  // The voice to speak with, or null for "let the iPhone use its own default".
   function currentVoice() {
-    const list = voices();
-    return list.find(v => v.voiceURI === prefs.voiceURI) || list[0] || null;
+    const list = shortlist();
+    if (prefs.voiceURI === '') return null;
+    if (prefs.voiceURI) {
+      const picked = list.find(v => v.voiceURI === prefs.voiceURI);
+      if (picked) return picked;
+    }
+    return list.length && tier(list[0]) >= 2 ? list[0] : null; // automatic: best good voice, else phone default
   }
   function fillVoices() {
     const sel = $('voiceSelect');
-    const list = voices();
-    sel.textContent = '';
-    if (!list.length) {
-      const o = document.createElement('option');
-      o.textContent = 'Phone default voice';
-      o.value = '';
-      sel.appendChild(o);
-      return;
-    }
+    const list = shortlist();
     const chosen = currentVoice();
+    sel.textContent = '';
+    const def = document.createElement('option');
+    def.value = '';
+    def.textContent = 'iPhone default voice';
+    def.selected = !chosen;
+    sel.appendChild(def);
     for (const v of list) {
       const o = document.createElement('option');
       o.value = v.voiceURI;
       o.textContent = voiceLabel(v);
-      if (chosen && v.voiceURI === chosen.voiceURI) o.selected = true;
+      o.selected = !!chosen && v.voiceURI === chosen.voiceURI;
       sel.appendChild(o);
     }
+    $('voiceNote').textContent = list.some(v => tier(v) >= 2)
+      ? ''
+      : 'iPhone only gave this app its basic voices. For your usual high-quality voice, tap Speak Screen at the top of the reading page.';
   }
 
-  // ---------- Keeping the screen awake while reading ----------
+  // ---------- Keeping the screen awake ----------
   const canStayAwake = 'wakeLock' in navigator;
-  let wantAwake = false;   // what we want right now (Play = true, Pause = false)
+  let wakeLock = null;
+  let wantAwake = false;   // what we want right now
   let wakePending = false; // a request is still waiting for the phone to answer
   async function keepAwake(on) {
     wantAwake = on;
@@ -642,11 +861,13 @@
   // and lets us save your spot after every sentence.
   function speakCurrent() {
     if (!synth || !cur) return;
+    // Skip anything with nothing to say (a row of dashes, a lone web address turned into nothing).
+    while (cur.pos < sents.length && !hasWords(speakable(sents[cur.pos].t))) cur.pos++;
     if (cur.pos >= sents.length) { finish(); return; }
     const my = ++token;
-    const u = new SpeechSynthesisUtterance(sents[cur.pos].t);
+    const u = new SpeechSynthesisUtterance(speakable(sents[cur.pos].t));
     const v = currentVoice();
-    if (v) { u.voice = v; u.lang = v.lang; }
+    if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = 'en-US'; }
     u.rate = prefs.rate;
     u.onend = () => {
       if (my !== token || !playing) return; // stale event from a sentence we stopped
@@ -664,6 +885,7 @@
     };
     synth.speak(u);
     updateProgress();
+    scrollToCurrent(true);
   }
 
   function play() {
@@ -704,22 +926,23 @@
     cur.pos = Math.max(0, Math.min(i, sents.length - 1));
     savePos();
     updateProgress();
-    scrollToCurrent(true);
+    scrollToCurrent(true, true);
     if (playing) play();
   }
 
+  // Swaps the triangle for the two bars while reading.
+  // (These are SVG pictures, which ignore the ".hidden" shortcut, so we set the attribute itself.)
   function setPlayIcon() {
-    $('playIcon').hidden = playing;
-    $('pauseIcon').hidden = !playing;
+    $('playIcon').toggleAttribute('hidden', playing);
+    $('pauseIcon').toggleAttribute('hidden', !playing);
     $('playBtn').setAttribute('aria-label', playing ? 'Pause' : 'Play');
-    $('awakeNote').textContent = canStayAwake
-      ? (playing ? 'Screen stays on while reading.' : 'The screen stays on while reading.')
-      : 'Tip: set Settings > Display & Brightness > Auto-Lock to Never while you listen.';
   }
 
   // If you switch away and come back, iPhone drops the "stay awake" request, and may stop the voice.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible' || !playing) return;
+    if (document.visibilityState !== 'visible') return;
+    if (currentView() === 'speakView') { keepAwake(true); return; }
+    if (!playing) return;
     keepAwake(true);
     setTimeout(() => {
       if (playing && synth && !synth.speaking && !synth.pending) {
@@ -729,11 +952,68 @@
     }, 1200);
   });
 
+  // ---------- Speed ----------
+  const SPEED_STEPS = [1, 1.25, 1.5, 1.75, 2];
+  function setRate(r) {
+    prefs.rate = Math.round(Math.max(0.5, Math.min(2, r)) * 100) / 100;
+    savePrefs();
+    showRate();
+    updateProgress();        // the "min left" estimate depends on speed
+    if (playing) play();     // restart this sentence at the new speed
+  }
+  function showRate() {
+    const label = (prefs.rate % 1 === 0 ? prefs.rate.toFixed(1) : String(prefs.rate)) + '×';
+    $('speedChip').textContent = label;
+    $('rateText').textContent = label;
+    $('rateInput').value = prefs.rate;
+  }
+
+  // ---------- Text size ----------
+  function setSize(px) {
+    prefs.size = Math.max(17, Math.min(33, px));
+    savePrefs();
+    document.documentElement.style.setProperty('--read-size', prefs.size + 'px');
+    if (cur && currentView() === 'readerView') scrollToCurrent(false, true);
+  }
+
+  // ---------- Options pop-up ----------
+  function openSheet() { fillVoices(); showRate(); $('sheetWrap').hidden = false; }
+  function closeSheet() { $('sheetWrap').hidden = true; }
+
   // ---------- Speak Screen view ----------
+  // Shows only the unread part, so the iPhone's own Speak Screen (your usual voice) starts at your spot.
+  // The screen stays awake here, and your spot follows the page as Speak Screen scrolls it.
+  let speakTimer = 0;
   function openSpeakView() {
     stop();
-    renderSentences($('speakText'), cur.pos);
+    closeSheet();
+    renderSentences($('speakText'), Math.min(cur.pos, sents.length - 1));
     show('speakView');
+    keepAwake(true);
+    toast('Swipe down from the top with two fingers to start Speak Screen.', 6000);
+  }
+  // Saves the first sentence still showing at the top of the screen as your spot.
+  function trackSpeakScroll() {
+    clearTimeout(speakTimer);
+    speakTimer = setTimeout(() => {
+      if (currentView() !== 'speakView' || !cur) return;
+      const top = document.querySelector('#speakView .topbar').getBoundingClientRect().bottom;
+      for (const el of $('speakText').querySelectorAll('.s')) {
+        if (el.getBoundingClientRect().bottom > top + 4) {
+          cur.pos = +el.dataset.i;
+          savePos();
+          return;
+        }
+      }
+    }, 300);
+  }
+  function closeSpeakView() {
+    clearTimeout(speakTimer);
+    keepAwake(false);
+    renderSentences($('readerText'), 0);
+    show('readerView');
+    updateProgress();
+    scrollToCurrent(false, true);
   }
 
   // ---------- Wiring up the buttons ----------
@@ -761,24 +1041,39 @@
     const s = e.target.closest('.s');
     if (s) jumpTo(+s.dataset.i);
   });
+  $('spotPill').addEventListener('click', () => scrollToCurrent(true, true));
 
-  $('sheetToggle').addEventListener('click', () => {
-    fillVoices();
-    $('sheet').hidden = !$('sheet').hidden;
-    if (cur) scrollToCurrent(true); // keep the current sentence visible above the taller controls
+  // Hide the controls: tap the little handle or swipe down on the bar. Bring them back: tap or swipe up on the tab.
+  $('grabber').addEventListener('click', () => setCollapsed(true));
+  onSwipe($('controls'), () => setCollapsed(true), null);
+  $('showControls').addEventListener('click', () => setCollapsed(false));
+  onSwipe($('showControls'), null, () => setCollapsed(false));
+
+  $('speedChip').addEventListener('click', () => {
+    const next = SPEED_STEPS.find(s => s > prefs.rate + 0.001);
+    setRate(next || SPEED_STEPS[0]);
   });
+  $('optsBtn').addEventListener('click', openSheet);
+  $('sheetDone').addEventListener('click', closeSheet);
+  $('backdrop').addEventListener('click', closeSheet);
+  $('rateInput').addEventListener('input', (e) => { $('rateText').textContent = (+e.target.value) + '×'; });
+  $('rateInput').addEventListener('change', (e) => setRate(+e.target.value));
+  $('rateDown').addEventListener('click', () => setRate(prefs.rate - 0.1));
+  $('rateUp').addEventListener('click', () => setRate(prefs.rate + 0.1));
   $('voiceSelect').addEventListener('change', (e) => {
     prefs.voiceURI = e.target.value;
     savePrefs();
     if (playing) play(); // restart this sentence in the new voice
   });
-  $('rateInput').value = prefs.rate;
-  $('rateText').textContent = (+prefs.rate).toFixed(2) + 'x';
-  $('rateInput').addEventListener('input', (e) => {
-    prefs.rate = +e.target.value;
-    $('rateText').textContent = prefs.rate.toFixed(2) + 'x';
+  $('sizeDown').addEventListener('click', () => setSize(prefs.size - 2));
+  $('sizeUp').addEventListener('click', () => setSize(prefs.size + 2));
+  $('renameBtn').addEventListener('click', () => {
+    const name = prompt('Name for this document:', cur.title);
+    if (!name || !name.trim()) return;
+    cur.title = name.trim().slice(0, 80);
+    savePos();
+    $('readerTitle').textContent = cur.title;
   });
-  $('rateInput').addEventListener('change', () => { savePrefs(); if (playing) play(); });
 
   $('speakViewBtn').addEventListener('click', openSpeakView);
   $('speakText').addEventListener('click', (e) => {
@@ -790,34 +1085,31 @@
     s.classList.add('now');
     toast('Spot saved.');
   });
-  $('speakDone').addEventListener('click', () => {
-    renderSentences($('readerText'), 0);
-    show('readerView');
-    updateProgress();
-    scrollToCurrent(false);
-  });
+  $('speakDone').addEventListener('click', closeSpeakView);
 
   // Voices load a moment after the page opens on iPhone.
-  if (synth) {
-    if ('onvoiceschanged' in synth) synth.addEventListener('voiceschanged', fillVoices);
-    setTimeout(fillVoices, 300);
+  if (synth && 'onvoiceschanged' in synth) {
+    synth.addEventListener('voiceschanged', () => { if (!$('sheetWrap').hidden) fillVoices(); });
   }
 
   // Save your spot if the app is closed mid-sentence.
   window.addEventListener('pagehide', () => { if (cur) savePos(); });
+  window.addEventListener('resize', () => { if (cur && currentView() === 'readerView') { fitPadding(); updatePill(); } });
 
   // Offline support: lets the app open with no internet after the first visit.
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
+  document.documentElement.style.setProperty('--read-size', prefs.size + 'px');
+  showRate();
   setPlayIcon();
   renderLibrary();
 
-  // Test handle (read-only peek at state, used when checking the app on a computer).
+  // Test handle (used when checking the app on a computer).
   window.RL = {
-    state: () => ({ view: ['libraryView', 'readerView', 'speakView'].find(id => !$(id).hidden), playing, pos: cur && cur.pos, total: sents.length, docs: docs.length }),
-    addDoc, openDoc, toSentences
+    state: () => ({ view: currentView(), playing, pos: cur && cur.pos, total: sents.length, docs: docs.length, follow, collapsed: isCollapsed() }),
+    addDoc, openDoc, toSentences, speakable, shortlist, voiceLabel
   };
 })();
 </script>
