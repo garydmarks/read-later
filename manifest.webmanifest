@@ -1,0 +1,14 @@
+{
+  "name": "Read Later",
+  "short_name": "Read Later",
+  "description": "Paste text, listen to it read aloud, and pick up where you left off.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f3ec",
+  "theme_color": "#0d6b6e",
+  "icons": [
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
