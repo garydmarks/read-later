@@ -130,6 +130,15 @@
     display: flex; align-items: center; justify-content: center;
   }
   .doc-del svg { width: 22px; height: 22px; }
+  /* Pin: a pinned document stays at the top of the list */
+  .doc-pin {
+    width: 52px; border: 0; border-left: 1px solid var(--line);
+    background: none; color: var(--muted);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .doc-pin svg { width: 22px; height: 22px; }
+  .doc-pin[aria-pressed="true"] { color: var(--accent); }
+  .doc-pin[aria-pressed="true"] svg { fill: currentColor; }
   .empty { color: var(--muted); padding: 16px 0; font-size: 16px; }
   .danger-link { color: var(--danger); margin-top: 24px; }
 
@@ -515,6 +524,16 @@
   // voiceURI: null = pick the best one automatically, '' = the iPhone's default voice
   const prefs = Object.assign({ rate: 1, voiceURI: null, size: 21 }, readJSON(PREFS_KEY, {}));
   const saveDocs = () => writeJSON(DOCS_KEY, docs);
+
+  // Asks the iPhone to treat this app's saved documents as important, so it won't clear them
+  // when the phone runs low on space. The phone decides; the app works the same either way.
+  function askToKeepData() {
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        navigator.storage.persisted().then(already => { if (!already) navigator.storage.persist(); }).catch(() => {});
+      }
+    } catch (e) { /* not supported: nothing to do */ }
+  }
   const savePrefs = () => writeJSON(PREFS_KEY, prefs);
 
   // ---------- Screen switching and dates ----------
@@ -604,7 +623,8 @@
   function renderLibrary() {
     const list = $('docList');
     list.textContent = '';
-    const sorted = [...docs].sort((a, b) => b.updated - a.updated);
+    // Pinned documents first; within each group, the one you used most recently is on top.
+    const sorted = [...docs].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated);
     for (const d of sorted) {
       const frac = d.total ? d.pos / d.total : 0;
       const pct = Math.round(frac * 100);
@@ -644,7 +664,20 @@
         renderLibrary();
       });
 
-      li.append(open, del);
+      // Pin button: tap to keep this document at the top (doesn't count as "using" it, so the order below stays put).
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'doc-pin';
+      pin.setAttribute('aria-pressed', String(!!d.pinned));
+      pin.setAttribute('aria-label', (d.pinned ? 'Unpin ' : 'Pin to top: ') + d.title);
+      pin.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 14v7"/></svg>';
+      pin.addEventListener('click', () => {
+        d.pinned = !d.pinned;
+        saveDocs();
+        renderLibrary();
+      });
+
+      li.append(open, pin, del);
       list.appendChild(li);
     }
     $('emptyMsg').hidden = docs.length > 0;
@@ -669,6 +702,7 @@
     };
     docs.push(doc);
     if (!saveDocs()) { docs.pop(); return; }
+    askToKeepData(); // a tap just happened, which some phones want before saying yes
     openDoc(doc.id);
   }
 
@@ -1601,6 +1635,7 @@
   showRate();
   setPlayIcon();
   renderLibrary();
+  if (docs.length) askToKeepData();
 
   // Test handle (used when checking the app on a computer).
   window.RL = {
