@@ -448,6 +448,9 @@
     </div>
 
     <button id="marksBtn" class="btn-secondary" type="button">Highlights and notes</button>
+    <!-- Export opens the iPhone Share screen: Mail, Outlook, Files, OneDrive, Notes, AirDrop and so on -->
+    <button id="shareMarked" class="btn-secondary go" type="button">Export with highlights and notes</button>
+    <button id="sharePlain" class="btn-secondary" type="button">Export plain text</button>
     <button id="renameBtn" class="btn-secondary" type="button">Rename this document</button>
   </div>
 </div>
@@ -1013,6 +1016,100 @@
     return lines.join('\n').trim();
   }
 
+  // ---------- Export: send any saved document out of the app (email it to work, save to Files or OneDrive) ----------
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const EXPORT_COLORS = { yellow: '#ffd43b', blue: '#bfe0ff', red: '#ffc4c0' };
+
+  // Walks the document paragraph by paragraph. For each sentence, `piece(text, mark)` turns a stretch
+  // of text into output (mark = null for plain text). After each paragraph, `noteAfter(mark)` adds
+  // any note whose highlight ended in that paragraph. Returns a list of paragraph blocks.
+  function walkDoc(piece, noteAfter) {
+    const idx = markIndex();
+    const blocks = [];
+    let parts = [], notes = [], lastP = -1;
+    const flush = () => {
+      if (parts.length) blocks.push({ text: parts.join(' '), notes });
+      parts = []; notes = [];
+    };
+    for (let i = 0; i < sents.length; i++) {
+      if (sents[i].p !== lastP) { flush(); lastP = sents[i].p; }
+      const t = sents[i].t;
+      let out = '', at = 0;
+      for (const pc of idx.get(i) || []) {
+        out += piece(t.slice(at, pc.from), null) + piece(t.slice(pc.from, pc.to), pc.m);
+        if (pc.m.note && pc.m.e === i) notes.push(noteAfter(pc.m));
+        at = pc.to;
+      }
+      parts.push(out + piece(t.slice(at), null));
+    }
+    flush();
+    return blocks;
+  }
+
+  // A web page file: opens in any browser (or Word) with the colors, each note boxed under its
+  // paragraph, and every highlight and note listed at the end.
+  function exportHTML() {
+    const blocks = walkDoc(
+      (t, m) => m ? '<mark style="background:' + EXPORT_COLORS[m.c] + '">' + esc(t) + '</mark>' : esc(t),
+      (m) => '<div class="note"><b>Note</b> on “' + esc(m.q) + '”<br>' + esc(m.note).replace(/\n/g, '<br>') + '</div>'
+    );
+    const body = blocks.map(b => '<p>' + b.text + '</p>' + b.notes.join('')).join('\n');
+    const marks = (cur.marks || []).slice().sort(byPos);
+    const list = marks.length
+      ? '<h2>Highlights and notes</h2>\n<ul>' + marks.map(m =>
+          '<li><mark style="background:' + EXPORT_COLORS[m.c] + '">' + esc(m.q) + '</mark>'
+          + (m.note ? '<div class="note">' + esc(m.note).replace(/\n/g, '<br>') + '</div>' : '') + '</li>').join('') + '</ul>'
+      : '';
+    return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+      + '<title>' + esc(cur.title) + '</title><style>'
+      + 'body{font:18px/1.6 Georgia,serif;color:#1c1d1f;background:#fff;max-width:720px;margin:24px auto;padding:0 16px;overflow-wrap:anywhere}'
+      + 'h1{font:700 24px/1.3 -apple-system,"Segoe UI",sans-serif}h2{font:700 19px -apple-system,"Segoe UI",sans-serif;margin-top:40px;border-top:1px solid #ddd;padding-top:24px}'
+      + '.meta{color:#5d6066;font:14px -apple-system,"Segoe UI",sans-serif}mark{color:inherit;border-radius:3px;padding:1px 0}'
+      + '.note{font:15px/1.45 -apple-system,"Segoe UI",sans-serif;background:#f4f1ea;border-radius:8px;padding:8px 12px;margin:-6px 0 18px}'
+      + 'li{margin-bottom:14px}li .note{margin:6px 0 0}'
+      + '</style></head><body>\n<h1>' + esc(cur.title) + '</h1>\n<p class="meta">From Read Later, ' + esc(new Date().toLocaleDateString()) + '</p>\n'
+      + body + '\n' + list + '\n</body></html>\n';
+  }
+
+  // The same thing as plain text, for when the iPhone won't share a file: «highlights» and notes marked.
+  function exportMarkedText() {
+    const blocks = walkDoc((t, m) => m ? '«' + t + '»' : t, (m) => 'NOTE on «' + m.q + '»: ' + m.note);
+    const text = blocks.map(b => [b.text, ...b.notes].join('\n')).join('\n\n');
+    return (cur.marks || []).length ? text + '\n\n----------\nHIGHLIGHTS AND NOTES\n\n' + marksAsText() : text;
+  }
+
+  function saveFile(file) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+
+  // Opens the iPhone Share screen (Mail, Outlook, Files, OneDrive...). withMarks = the colored web-page file.
+  async function shareDoc(withMarks) {
+    if (!cur) return;
+    closeSheet();
+    const name = cur.title.replace(/[^A-Za-z0-9 ._()-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Read Later';
+    try {
+      if (withMarks) {
+        const file = new File([exportHTML()], name + '.html', { type: 'text/html' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: cur.title }); return; }
+        if (navigator.share) { await navigator.share({ title: cur.title, text: exportMarkedText() }); return; }
+        saveFile(file);
+        return;
+      }
+      if (navigator.share) { await navigator.share({ title: cur.title, text: cur.text }); return; }
+      saveFile(new File([cur.text], name + '.txt', { type: 'text/plain' }));
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // you closed the Share screen
+      toast('Couldn’t open the Share screen. Try Copy all in Highlights and notes.');
+    }
+  }
+
   function updateProgress() {
     if (!cur) return;
     const total = sents.length || 1;
@@ -1501,6 +1598,8 @@
 
   // Highlights and notes list
   $('marksBtn').addEventListener('click', openList);
+  $('shareMarked').addEventListener('click', () => shareDoc(true));
+  $('sharePlain').addEventListener('click', () => shareDoc(false));
   $('listDone').addEventListener('click', () => { $('listWrap').hidden = true; });
   $('listBackdrop').addEventListener('click', () => { $('listWrap').hidden = true; });
   $('copyAll').addEventListener('click', async () => {
@@ -1580,7 +1679,8 @@
   window.RL = {
     state: () => ({ view: currentView(), playing, pos: cur && cur.pos, total: sents.length, docs: docs.length, follow, collapsed: isCollapsed() }),
     addDoc, openDoc, toSentences, speakable, shortlist, voiceLabel,
-    marks: () => cur && cur.marks, addMark, readSelection, sliceText, marksAsText, openNote
+    marks: () => cur && cur.marks, addMark, readSelection, sliceText, marksAsText, openNote,
+    exportHTML, exportMarkedText
   };
 })();
 </script>
