@@ -302,18 +302,19 @@
   }
   .show-controls svg { width: 18px; height: 18px; }
   /* A few seconds after the controls hide, the tab shrinks to a bare arrow in the bottom-right
-     corner: the pill's background and border go fully clear, so text shows through around it,
-     while the arrow itself stays full strength. Accessibility guidance (WCAG 1.4.11) asks for 3:1
-     contrast on a control; this teal on the page measures about 5.7:1 (light) and 7:1 (dark).
-     An earlier 35%-opacity version measured about 1.7:1, too faint to find. Still a 44px tap
-     target (Apple's minimum), and swipe-up still works. */
+     corner: the pill's background and border go fully clear, so text shows through around it.
+     The arrow is faded to 75% so it sits back from the text (Gary, 2026-11-17) but stays easy to
+     find. Accessibility guidance (WCAG 1.4.11) asks for 3:1 contrast on a control; at 75% this teal
+     on the page measures about 3.5:1 (light) and 4.5:1 (dark). Full strength was 5.7:1 and 7:1;
+     an earlier 35% version measured about 1.7:1, too faint to find. Don't go below 70% (3.15:1 in
+     light). Still a 44px tap target (Apple's minimum), and swipe-up still works. */
   .show-controls.faded {
     left: auto; right: 8px; transform: none;
     bottom: calc(env(safe-area-inset-bottom) + 4px);
     width: 44px; padding: 0; justify-content: center;
     background: transparent; border-color: transparent; box-shadow: none;
   }
-  .show-controls.faded svg { width: 26px; height: 26px; }
+  .show-controls.faded svg { width: 26px; height: 26px; opacity: .75; }
   .show-controls.faded .sc-label { display: none; }
 
   /* "Back to reading spot" appears when you've scrolled away from the highlighted sentence */
@@ -575,7 +576,13 @@
   function readJSON(key, fallback) {
     let raw;
     try { raw = localStorage.getItem(key); }
-    catch (e) { toast("This phone won't let the app save. Is Private Browsing on?"); return fallback; }
+    catch (e) {
+      // Couldn't read at all. Protect the key exactly like unreadable data: if storage came back a
+      // moment later, the empty library shown here would otherwise be saved over every document.
+      brokenKeys.add(key);
+      toast("This phone won't let the app save. Is Private Browsing on?");
+      return fallback;
+    }
     if (raw === null) return fallback;
     try { return JSON.parse(raw); }
     catch (e) {
@@ -916,6 +923,14 @@
     return m;
   }
   function removeMarksIn(r) { carve(r); saveMarks(); }
+  // The notes that removing stretch r would delete, found by a dry run of the real removal
+  // (carve builds new pieces and never changes the old highlights, so putting the list back undoes it).
+  function notesLostBy(r) {
+    const before = cur.marks;
+    const notes = carve(r);
+    cur.marks = before;
+    return notes;
+  }
   const overlapsAny = (r) => (cur.marks || []).some(m => cmp(m.e, m.b, r.s, r.a) > 0 && cmp(r.e, r.b, m.s, m.a) > 0);
   const findMark = (id) => (cur && cur.marks || []).find(m => m.id === id);
 
@@ -1034,13 +1049,36 @@
     bar.hidden = !r;
     if (r) {
       $('markRemove').hidden = !overlapsAny(r);
-      bar.style.bottom = (window.innerHeight - visibleStrip().bottom + 12) + 'px';
+      placeMarkBar(bar);
     }
     updatePill();
+  }
+  // The bar acts the moment it's touched, so it must never sit on the selection's drag handles:
+  // touching a handle to adjust the selection would press a color or Remove instead. It goes in
+  // the first of these spots that keeps clear of both ends of the selection: just above the
+  // controls (the usual place), the top of the screen, or the middle.
+  const HANDLE_REACH = 28; // how far an iPhone selection handle reaches above or below its line
+  function placeMarkBar(bar) {
+    const strip = visibleStrip();
+    const sel = window.getSelection();
+    const rects = sel && sel.rangeCount
+      ? Array.from(sel.getRangeAt(0).getClientRects()).filter(x => x.width > 0 && x.height > 0) : [];
+    const ends = rects.length ? [rects[0], rects[rects.length - 1]] : [];
+    bar.style.top = 'auto';
+    bar.style.bottom = 'auto';
+    const h = bar.offsetHeight || 54;
+    const spots = [strip.bottom - 12 - h, strip.top + 12, (strip.top + strip.bottom - h) / 2];
+    const clear = (top) => ends.every(x => x.bottom + HANDLE_REACH <= top || x.top - HANDLE_REACH >= top + h);
+    const top = spots.find(clear);
+    if (top === undefined || top === spots[0]) bar.style.bottom = (window.innerHeight - strip.bottom + 12) + 'px';
+    else bar.style.top = top + 'px';
   }
   function markBarAction(btn) {
     const r = readSelection() || pendingSel;
     if (!r || !cur) return;
+    // Remove would also delete notes (the note pop-up's button says so; this bar has no room to), so ask first.
+    if (btn.dataset.act === 'remove' && notesLostBy(r).length
+        && !confirm('This also deletes the note on a highlight you selected. Notes can’t be recovered. Remove?')) return;
     barActedAt = Date.now();
     setTimeout(updatePill, BAR_SETTLE_MS + 50); // show "Back to reading spot" again once your finger is up
     window.getSelection().removeAllRanges();
@@ -1481,10 +1519,13 @@
       speakCurrent();
     };
     u.onerror = (e) => {
+      // The app's own stops and restarts bump the token before cancelling, so they end here.
       if (my !== token) return;
-      if (e.error === 'interrupted' || e.error === 'canceled') return;
+      // Anything else that stopped the voice (Siri, an alarm, another app's sound) used to be ignored,
+      // leaving the Pause button showing over silence. Show it as paused instead.
+      const outside = e.error === 'interrupted' || e.error === 'canceled';
       stop();
-      toast('The voice stopped unexpectedly. Tap Play to continue.');
+      toast(outside ? 'Reading was interrupted. Tap Play to continue.' : 'The voice stopped unexpectedly. Tap Play to continue.');
     };
     synth.speak(u);
     updateProgress();
@@ -1824,7 +1865,13 @@
   $('findNext').addEventListener('click', () => { if (!finishTyping()) stepFind(1); });
   $('findRead').addEventListener('click', () => { finishTyping(); readFromFind(); });
   $('playBtn').addEventListener('click', () => (playing ? stop() : play()));
-  $('prevBtn').addEventListener('click', () => jumpTo(cur.pos - 1));
+  // Back one sentence, stepping over lines with nothing to say (a row of dashes). Reading skips forward
+  // over those, so landing on one replayed the same sentence and Back could never get past it.
+  $('prevBtn').addEventListener('click', () => {
+    let i = cur.pos - 1;
+    while (i > 0 && !hasWords(speakable(sents[i].t))) i--;
+    jumpTo(i);
+  });
   $('nextBtn').addEventListener('click', () => jumpTo(cur.pos + 1));
   $('readerText').addEventListener('click', (e) => {
     // Finishing or clearing a text selection is not a tap to jump.
@@ -1848,7 +1895,12 @@
     if (btn && e.detail === 0) markBarAction(btn);
   });
 
-  // Note pop-up
+  // Note pop-up. "Note" on the highlight bar opens it on touch-down, so the rest of that same tap
+  // lands on whatever is now under the finger. For a moment after a bar press, the pop-up's buttons
+  // ignore taps, so that tap can't delete the highlight and its note (or close the pop-up at once).
+  for (const id of ['noteDone', 'noteBackdrop', 'noteDots', 'noteRemove']) {
+    $(id).addEventListener('click', (e) => { if (barJustActed()) e.stopImmediatePropagation(); });
+  }
   $('noteText').addEventListener('input', (e) => {
     const m = findMark(noteId);
     if (m) m.note = e.target.value.trim();
