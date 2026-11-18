@@ -301,6 +301,18 @@
     font-size: 15px; font-weight: 600; color: var(--accent);
   }
   .show-controls svg { width: 18px; height: 18px; }
+  /* A few seconds after the controls hide, the tab shrinks to a faint arrow in the bottom-right
+     corner so it doesn't sit on the text. Still 44px to tap, and swipe-up still works. */
+  .show-controls.faded {
+    left: auto; right: 12px; transform: none;
+    bottom: calc(env(safe-area-inset-bottom) + 4px);
+    width: 44px; padding: 0; justify-content: center;
+    opacity: .35; box-shadow: none;
+    /* A transition, not a keyframe animation: if the phone pauses animations, a keyframe could
+       stick at its invisible first frame, while a transition just lands on .35. */
+    transition: opacity .5s ease;
+  }
+  .show-controls.faded .sc-label { display: none; }
 
   /* "Back to reading spot" appears when you've scrolled away from the highlighted sentence */
   .spot-pill {
@@ -452,9 +464,9 @@
     </div>
   </div>
 
-  <button id="showControls" class="show-controls" type="button" hidden>
+  <button id="showControls" class="show-controls" type="button" aria-label="Show controls" hidden>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
-    Controls
+    <span class="sc-label">Controls</span>
   </button>
 </section>
 
@@ -1317,9 +1329,15 @@
   }, { passive: true });
 
   // ---------- Hiding and showing the controls ----------
+  let fadeTimer = 0;
+  const TAB_FADE_MS = 3000;
   function setCollapsed(on) {
     $('readerView').classList.toggle('collapsed', on);
     $('showControls').hidden = !on;
+    // The "Controls" tab shows in full first (so you can see where it went), then fades to a corner arrow.
+    clearTimeout(fadeTimer);
+    $('showControls').classList.remove('faded');
+    if (on) fadeTimer = setTimeout(() => $('showControls').classList.add('faded'), TAB_FADE_MS);
     fitPadding();
     setTimeout(updatePill, 280); // after the slide finishes
   }
