@@ -15,6 +15,19 @@
 <meta name="theme-color" content="#16181a" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
+<script>
+  // Puts on the Light or Dark choice from Options before the page draws, so a chosen theme never
+  // flashes the other one first. Only reads the saved settings; the main script does the rest.
+  try {
+    var savedTheme = (JSON.parse(localStorage.getItem('readlater.v1.prefs')) || {}).theme;
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      // Status-bar color too (same colors as THEME_BG in the main script)
+      var themeBg = savedTheme === 'dark' ? '#16181a' : '#f6f3ec';
+      document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) { m.setAttribute('content', themeBg); });
+    }
+  } catch (e) { /* unreadable settings: follow the iPhone */ }
+</script>
 <style>
   /* ---------- Colors (light first, dark below) ---------- */
   :root {
@@ -34,8 +47,11 @@
     --hl-red: #ffc4c0;
     color-scheme: light dark;
   }
+  /* Dark colors. Options > Appearance: Auto follows the iPhone (this first block), Dark forces the
+     second block, Light skips both. KEEP THE TWO DARK BLOCKS IDENTICAL: CSS can't share one list of
+     values between a media query and an attribute selector without repeating it. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #16181a;
       --surface: #212427;
       --ink: #ebe8e2;
@@ -51,6 +67,24 @@
       --hl-red: #6d2a26;
     }
   }
+  :root[data-theme="dark"] {
+    --bg: #16181a;
+    --surface: #212427;
+    --ink: #ebe8e2;
+    --muted: #a4a7ad;
+    --line: #33373b;
+    --accent: #4fb3b0;
+    --accent-ink: #0d1415;
+    --hilite: #5a4a12;
+    --danger: #ef8a83;
+    --shadow: 0 1px 2px rgba(0,0,0,.4);
+    --hl-yellow: #7a6400;
+    --hl-blue: #1d4870;
+    --hl-red: #6d2a26;
+  }
+  /* color-scheme tells Safari which way to draw its own parts (the voice picker, the keyboard) */
+  :root[data-theme="dark"] { color-scheme: dark; }
+  :root[data-theme="light"] { color-scheme: light; }
 
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -200,6 +234,9 @@
   .s { border-radius: 4px; padding: 1px 0; }
   .s.now { background: var(--hilite); box-shadow: 0 0 0 3px var(--hilite); }
   .s.done { color: var(--muted); }
+  /* Already-read words inside your own highlight keep full-strength text: gray on a dark yellow
+     highlight measured only 2.4:1 (full-strength text: 4.7:1) */
+  .s.done .hl { color: var(--ink); }
 
   /* ---------- Your highlights and notes ---------- */
   .hl { color: inherit; border-radius: 3px; padding: 1px 0; }
@@ -301,31 +338,28 @@
     .mk-btn { padding: 0 10px; }
   }
 
-  /* Small tab that brings the controls back when they're hidden */
+  /* The bare arrow in the bottom-right corner that brings the controls back when they're hidden.
+     It appears there at once. (It used to show a "Controls" tab in the middle for 3 seconds first,
+     and that tab could sit almost on top of "Back to reading spot"; Gary, 2026-11-18.)
+     Clear button background, so text shows around it (only a small disc right behind the arrow
+     hides the text under it; see .arrow-bg below). The arrow is faded to 70% so it sits back
+     from the text (Gary, 2026-11-17) but stays easy to find. Accessibility guidance (WCAG 1.4.11)
+     asks for 3:1 contrast on a control; at 70% this teal on the page measures about 3.15:1 (light)
+     and 4.1:1 (dark). Full strength was 5.7:1 and 7:1; an earlier 35% version measured about 1.7:1,
+     too faint to find. 70% is the floor: any lighter fails 3:1 in light mode. Still a 44px tap
+     target (Apple's minimum), and swipe-up still works. */
   .show-controls {
-    position: fixed; left: 50%; transform: translateX(-50%);
-    bottom: calc(env(safe-area-inset-bottom) + 12px); z-index: 6;
-    display: flex; align-items: center; gap: 6px;
-    height: 44px; padding: 0 16px; border-radius: 22px;
-    border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow);
-    font-size: 15px; font-weight: 600; color: var(--accent);
+    position: fixed; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); z-index: 6;
+    display: flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0; border: 0; background: transparent;
+    color: var(--accent);
   }
-  .show-controls svg { width: 18px; height: 18px; }
-  /* A few seconds after the controls hide, the tab shrinks to a bare arrow in the bottom-right
-     corner: the pill's background and border go fully clear, so text shows through around it.
-     The arrow is faded to 70% so it sits back from the text (Gary, 2026-11-17) but stays easy to
-     find. Accessibility guidance (WCAG 1.4.11) asks for 3:1 contrast on a control; at 70% this teal
-     on the page measures about 3.15:1 (light) and 4.1:1 (dark). Full strength was 5.7:1 and 7:1;
-     an earlier 35% version measured about 1.7:1, too faint to find. 70% is the floor: any lighter
-     fails 3:1 in light mode. Still a 44px tap target (Apple's minimum), and swipe-up still works. */
-  .show-controls.faded {
-    left: auto; right: 8px; transform: none;
-    bottom: calc(env(safe-area-inset-bottom) + 4px);
-    width: 44px; padding: 0; justify-content: center;
-    background: transparent; border-color: transparent; box-shadow: none;
-  }
-  .show-controls.faded svg { width: 26px; height: 26px; opacity: .7; }
-  .show-controls.faded .sc-label { display: none; }
+  .show-controls svg { width: 26px; height: 26px; }
+  /* The 70% fade is on the arrow line only. A small disc in the page color sits behind it, so the arrow
+     keeps the same contrast even when a highlighted or "now reading" line runs under the corner (over a
+     yellow highlight the bare arrow measured 2.8:1 light and 1.8:1 dark). On plain page the disc is invisible. */
+  .show-controls .arrow-line { stroke-opacity: .7; }
+  .show-controls .arrow-bg { fill: var(--bg); stroke: none; }
 
   /* "Back to reading spot" appears when you've scrolled away from the highlighted sentence */
   .spot-pill {
@@ -370,6 +404,8 @@
   }
   .hint { font-size: 14px; color: var(--muted); margin: 0; }
   .sheet > .btn-secondary { width: 100%; } /* only the full-width Rename button, not the A- / A+ pair */
+  /* The Appearance choice that's on: teal outline and teal words (both above 3:1 on the button in light and dark) */
+  .theme-row .btn-secondary[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
   .version { text-align: center; font-size: 12px; margin-top: -8px; } /* small and quiet: there only if you look for it */
 
 
@@ -489,8 +525,7 @@
   </div>
 
   <button id="showControls" class="show-controls" type="button" aria-label="Show controls" hidden>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
-    <span class="sc-label">Controls</span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle class="arrow-bg" cx="12" cy="12" r="9.5"/><path class="arrow-line" d="M6 15l6-6 6 6"/></svg>
   </button>
 </section>
 
@@ -523,6 +558,16 @@
       <div class="row">
         <button id="sizeDown" class="btn-secondary" type="button" aria-label="Smaller text">A&minus;</button>
         <button id="sizeUp" class="btn-secondary" type="button" aria-label="Bigger text">A+</button>
+      </div>
+    </div>
+
+    <!-- Light or dark colors. Auto follows the iPhone's own setting. -->
+    <div class="field">
+      <span id="themeLabel" class="field-label">Appearance (Auto matches the iPhone)</span>
+      <div id="themeRow" class="row theme-row" role="group" aria-labelledby="themeLabel">
+        <button class="btn-secondary" type="button" data-mode="auto">Auto</button>
+        <button class="btn-secondary" type="button" data-mode="light">Light</button>
+        <button class="btn-secondary" type="button" data-mode="dark">Dark</button>
       </div>
     </div>
 
@@ -580,7 +625,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '5.6';
+  const APP_VERSION = '5.7';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -622,7 +667,8 @@
   }
   function writeJSON(key, value) {
     if (brokenKeys.has(key)) { // don't save over data we failed to read, and say so instead of failing silently
-      if (key === DOCS_KEY) toast('Saved documents could not be read, so changes can’t be saved.');
+      toast(key === DOCS_KEY ? 'Saved documents could not be read, so changes can’t be saved.'
+        : 'Saved settings could not be read, so this change lasts only until you close the app.');
       return false;
     }
     try { localStorage.setItem(key, JSON.stringify(value)); return true; }
@@ -631,7 +677,8 @@
 
   let docs = readJSON(DOCS_KEY, []);           // [{id, title, text, total, pos, created, updated}]
   // voiceURI: null = pick the best one automatically, '' = the iPhone's default voice
-  const prefs = Object.assign({ rate: 1, voiceURI: null, size: 21 }, readJSON(PREFS_KEY, {}));
+  // theme: 'auto' (follow the iPhone), 'light' or 'dark' (Options > Appearance)
+  const prefs = Object.assign({ rate: 1, voiceURI: null, size: 21, theme: 'auto' }, readJSON(PREFS_KEY, {}));
   const saveDocs = () => writeJSON(DOCS_KEY, docs);
 
   // Asks the iPhone to treat this app's saved documents as important, so it won't clear them
@@ -845,6 +892,9 @@
   let token = 0;         // bumps on every start/stop so old speech events are ignored
   let follow = true;     // true = the screen follows the sentence being read
   let autoScrollUntil = 0; // while the app itself is scrolling, don't mistake it for your finger
+  // While the controls slide up or down, "Back to reading spot" stays hidden whoever asks to show it
+  // (a sentence ending mid-slide used to bring it back over Play / Back / Forward). Set in setCollapsed.
+  let pillHoldUntil = 0;
   let finds = [];        // search matches: [{a: {i, o}, b: {i, o}}] (start and end, as sentence + character)
   let findAt = -1;       // the match you're on
   let findTimer = 0;     // a search waiting for you to pause typing (0 = none)
@@ -1337,7 +1387,12 @@
   // The strip of screen where text is actually visible: below the top bar, above the controls.
   function visibleStrip() {
     const top = document.querySelector('#readerView .topbar').getBoundingClientRect().bottom;
-    const bottom = isCollapsed() ? window.innerHeight - 72 : $('controls').getBoundingClientRect().top;
+    // Controls hidden: the strip ends 8px above the corner arrow, so "Back to reading spot" (placed 12px
+    // above the strip) clears the arrow on phones with a home bar. 72px is the fallback if the arrow isn't showing.
+    const arrow = $('showControls');
+    const bottom = isCollapsed()
+      ? (arrow.hidden ? window.innerHeight - 72 : Math.min(window.innerHeight - 72, arrow.getBoundingClientRect().top - 8))
+      : $('controls').getBoundingClientRect().top;
     return { top, bottom };
   }
   function curRect() {
@@ -1350,7 +1405,11 @@
   }
 
   // Brings the current sentence to the middle of the visible strip.
+  // A sentence too tall to fit (big text, long sentence) goes to the top of the strip instead, so its
+  // first line sits just below the top bar. Centering it pushed that line up under the bar, where the
+  // back arrow and magnifying glass hid it (Gary, 2026-11-18).
   // If you've scrolled away on purpose (follow = false), it leaves the screen alone unless forced.
+  const TALL_GAP = 12; // space between the top bar and a tall sentence's first line
   function scrollToCurrent(smooth, force) {
     fitPadding();
     if (force) follow = true;
@@ -1358,10 +1417,17 @@
     if (!r) return;
     const strip = visibleStrip();
     if (follow && (r.top < strip.top + 10 || r.bottom > strip.bottom - 10)) {
-      autoScrollUntil = Date.now() + 900;
-      const target = (strip.top + strip.bottom) / 2;
-      window.scrollBy({ top: (r.top + r.height / 2) - target, behavior: smooth ? 'smooth' : 'auto' });
-      setTimeout(updatePill, 950);
+      const tall = r.height > (strip.bottom - strip.top) - 2 * TALL_GAP;
+      const delta = tall
+        ? r.top - (strip.top + TALL_GAP)
+        : (r.top + r.height / 2) - (strip.top + strip.bottom) / 2;
+      // A tall sentence already at the top always "runs past the bottom", so without this check
+      // every call would scroll by nothing and restart the app-is-scrolling window.
+      if (Math.abs(delta) > 2) {
+        autoScrollUntil = Date.now() + 900;
+        window.scrollBy({ top: delta, behavior: smooth ? 'smooth' : 'auto' });
+        setTimeout(updatePill, 950);
+      }
     }
     updatePill();
   }
@@ -1376,7 +1442,8 @@
     const below = r && r.top > strip.bottom - 4;
     // Hidden while the highlight bar is up (they'd sit in the same spot).
     // Also hidden for a moment after a highlight-bar press (see barActedAt).
-    pill.hidden = !(above || below) || Date.now() < autoScrollUntil || !$('markBar').hidden || barJustActed();
+    pill.hidden = !(above || below) || Date.now() < autoScrollUntil || !$('markBar').hidden || barJustActed()
+      || Date.now() < pillHoldUntil; // the controls are still sliding (see setCollapsed)
     if (!pill.hidden) {
       $('spotArrow').style.transform = above ? 'rotate(180deg)' : '';
       pill.style.bottom = (window.innerHeight - strip.bottom + 12) + 'px';
@@ -1474,17 +1541,21 @@
   });
 
   // ---------- Hiding and showing the controls ----------
-  let fadeTimer = 0;
-  const TAB_FADE_MS = 3000;
+  // The corner arrow ignores taps for a moment after it appears, so the end of the tap or swipe
+  // that hid the controls can't land on it and bring them straight back.
+  const ARROW_SETTLE_MS = 350;
+  let collapsedAt = 0;
+  const SLIDE_MS = 280; // the controls' .25 s slide, plus a little
   function setCollapsed(on) {
     $('readerView').classList.toggle('collapsed', on);
     $('showControls').hidden = !on;
-    // The "Controls" tab shows in full first (so you can see where it went), then fades to a corner arrow.
-    clearTimeout(fadeTimer);
-    $('showControls').classList.remove('faded');
-    if (on) fadeTimer = setTimeout(() => $('showControls').classList.add('faded'), TAB_FADE_MS);
+    if (on) collapsedAt = Date.now();
+    // Hide "Back to reading spot" until the slide finishes: otherwise, while the controls slide back up,
+    // it sat over Play / Back / Forward and caught a quick tap. updatePill brings it back below.
+    $('spotPill').hidden = true;
+    pillHoldUntil = Date.now() + SLIDE_MS;
     fitPadding();
-    setTimeout(updatePill, 280); // after the slide finishes
+    setTimeout(updatePill, SLIDE_MS + 20); // after the slide and the hold have both ended
   }
   // Calls onDown / onUp when a finger swipes down or up on the element.
   function onSwipe(el, onDown, onUp) {
@@ -1877,11 +1948,28 @@
   function setSize(px, save = true) {
     prefs.size = Math.round(Math.max(MIN_SIZE, Math.min(MAX_SIZE, px)));
     document.documentElement.style.setProperty('--read-size', prefs.size + 'px');
-    if (!save) return;
-    savePrefs();
+    if (!save) return false;
+    const saved = savePrefs(); // false = not saved (savePrefs has already said why)
     // Keeps the reading spot in view only if you were following it. If you had scrolled away
     // (for example to a search match), resizing no longer throws you back to the reading spot.
     if (cur && currentView() === 'readerView') scrollToCurrent(false);
+    return saved;
+  }
+
+  // ---------- Appearance: Auto (follow the iPhone), Light or Dark ----------
+  // The page background in each theme, also used for the phone's status-bar color.
+  const THEME_BG = { light: '#f6f3ec', dark: '#16181a' };
+  function applyTheme() {
+    const t = (prefs.theme === 'light' || prefs.theme === 'dark') ? prefs.theme : 'auto'; // anything else counts as Auto
+    const root = document.documentElement;
+    if (t === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', t);
+    // The two theme-color tags each cover one iPhone setting. Auto puts back their own colors;
+    // a chosen theme gives both the same color, so the status bar matches whatever the iPhone is set to.
+    for (const m of document.querySelectorAll('meta[name="theme-color"]')) {
+      const own = (m.getAttribute('media') || '').includes('dark') ? THEME_BG.dark : THEME_BG.light;
+      m.setAttribute('content', t === 'auto' ? own : THEME_BG[t]);
+    }
+    for (const b of $('themeRow').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.mode === t));
   }
 
   // ---------- Pinch the text to resize it (and remember the size) ----------
@@ -1909,7 +1997,8 @@
     if (!pinch || e.touches.length >= 2) return;
     const changed = pinch.live;
     pinch = null;
-    if (changed) { setSize(prefs.size, true); toast('Text size ' + prefs.size + ' saved.', 1500); }
+    // Says "saved" only when it was: otherwise it would cover the warning that it couldn't be saved.
+    if (changed && setSize(prefs.size, true)) toast('Text size ' + prefs.size + ' saved.', 1500);
   };
   document.addEventListener('touchend', endPinch, { passive: true });
   document.addEventListener('touchcancel', endPinch, { passive: true });
@@ -2094,10 +2183,10 @@
   });
   $('spotPill').addEventListener('click', () => { if (!barJustActed()) scrollToCurrent(true, true); });
 
-  // Hide the controls: tap the little handle or swipe down on the bar. Bring them back: tap or swipe up on the tab.
+  // Hide the controls: tap the little handle or swipe down on the bar. Bring them back: tap or swipe up on the corner arrow.
   $('grabber').addEventListener('click', () => setCollapsed(true));
   onSwipe($('controls'), () => setCollapsed(true), null);
-  $('showControls').addEventListener('click', () => setCollapsed(false));
+  $('showControls').addEventListener('click', () => { if (Date.now() - collapsedAt >= ARROW_SETTLE_MS) setCollapsed(false); });
   onSwipe($('showControls'), null, () => setCollapsed(false));
 
   $('speedChip').addEventListener('click', () => {
@@ -2119,6 +2208,9 @@
   });
   $('sizeDown').addEventListener('click', () => setSize(prefs.size - 2));
   $('sizeUp').addEventListener('click', () => setSize(prefs.size + 2));
+  for (const b of $('themeRow').querySelectorAll('button')) {
+    b.addEventListener('click', () => { prefs.theme = b.dataset.mode; savePrefs(); applyTheme(); });
+  }
   $('renameBtn').addEventListener('click', () => {
     const name = prompt('Name for this document:', cur.title);
     if (!name || !name.trim()) return;
@@ -2142,6 +2234,7 @@
   }
 
   document.documentElement.style.setProperty('--read-size', prefs.size + 'px');
+  applyTheme();
   $('appVersion').textContent = 'v' + APP_VERSION;
   showRate();
   setPlayIcon();
