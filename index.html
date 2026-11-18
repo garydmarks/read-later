@@ -338,11 +338,13 @@
   .spot-pill svg { width: 18px; height: 18px; }
 
   /* ---------- Options pop-up ---------- */
-  .sheet-wrap { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; }
+  /* overscroll-behavior: when a pop-up's own scrolling reaches its top or bottom, the swipe stops
+     there instead of carrying on into the reading page behind it (see trapScroll in the script) */
+  .sheet-wrap { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; overscroll-behavior: none; }
   .backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.4); border: 0; padding: 0; width: 100%; }
   .sheet {
     position: relative; width: 100%; max-width: 680px; margin: 0 auto;
-    max-height: 88%; overflow-y: auto;
+    max-height: 88%; overflow-y: auto; overscroll-behavior: contain;
     background: var(--surface); border-radius: 20px 20px 0 0;
     padding: 12px 16px 16px;
     padding-bottom: calc(env(safe-area-inset-bottom) + 16px); /* extra room above the iPhone home bar */
@@ -578,7 +580,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '5.5';
+  const APP_VERSION = '5.6';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1925,6 +1927,33 @@
     $('sheetWrap').hidden = false;
   }
   function closeSheet() { $('sheetWrap').hidden = true; }
+
+  // Pop-ups never scroll the reading page behind them. On iPhone, once a pop-up's own scrolling hit
+  // its top or bottom, the swipe carried on into the page behind, and could stay stuck there so the
+  // pop-up's buttons couldn't be reached (Gary, iPhone, 2026-11-17). A vertical swipe is allowed only
+  // while something inside the pop-up can still scroll that way; otherwise it is stopped. Sideways
+  // drags (the speed slider) are left alone.
+  function canScroll(el, dy) {
+    const oy = getComputedStyle(el).overflowY;
+    if (!/(auto|scroll)/.test(oy) || el.scrollHeight <= el.clientHeight + 1) return false;
+    return dy > 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+  }
+  function trapScroll(wrap) {
+    let x0 = 0, y0 = 0;
+    wrap.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+    wrap.addEventListener('touchmove', (e) => {
+      if (e.touches.length !== 1) { e.preventDefault(); return; } // no pinch-zoom behind a pop-up either
+      const x = e.touches[0].clientX, y = e.touches[0].clientY;
+      const dx = x - x0, dy = y - y0; // dy > 0 = finger moving down = scrolling toward the top
+      x0 = x; y0 = y;
+      if (Math.abs(dx) > Math.abs(dy) || dy === 0) return; // sideways, like the speed slider
+      for (let el = e.target; el && el !== wrap; el = el.parentElement) {
+        if (canScroll(el, dy)) return; // something in the pop-up can still scroll: let it
+      }
+      e.preventDefault(); // nothing left to scroll that way: don't let the page behind move
+    }, { passive: false });
+  }
+  for (const id of ['sheetWrap', 'noteWrap', 'listWrap']) trapScroll($(id));
 
 
   // ---------- Wiring up the buttons ----------
