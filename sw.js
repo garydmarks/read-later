@@ -36,7 +36,10 @@ self.addEventListener('fetch', (event) => {
     const answer = (res) => { if (!done && res) { done = true; resolve(res); } };
     // The internet answer still saves a fresh copy even if it arrives after the saved copy was shown,
     // so the next launch gets the newest version.
-    fetch(req)
+    // cache: 'no-cache' asks GitHub whether the file changed every time, instead of reusing the phone's
+    // own copy for up to 10 minutes (GitHub's setting). Otherwise an update didn't show right after
+    // publishing, even after closing and reopening the app (Gary, iPhone, 2026-11-17).
+    fetch(req, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         if (res.ok) caches.open(CACHE).then((c) => c.put(req, copy));

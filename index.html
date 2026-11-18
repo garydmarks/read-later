@@ -358,6 +358,7 @@
   }
   .hint { font-size: 14px; color: var(--muted); margin: 0; }
   .sheet > .btn-secondary { width: 100%; } /* only the full-width Rename button, not the A- / A+ pair */
+  .version { text-align: center; font-size: 12px; margin-top: -8px; } /* small and quiet: there only if you look for it */
 
 
   .toast {
@@ -510,6 +511,8 @@
     <button id="shareMarked" class="btn-secondary go" type="button">Export with highlights and notes</button>
     <button id="sharePlain" class="btn-secondary" type="button">Export plain text</button>
     <button id="renameBtn" class="btn-secondary" type="button">Rename this document</button>
+    <!-- Which version is running, so you can tell whether an update has reached the phone -->
+    <p id="appVersion" class="hint version"></p>
   </div>
 </div>
 
@@ -552,6 +555,10 @@
 <script>
 (() => {
   'use strict';
+
+  // The version shown at the bottom of Options. Change it with every update you publish, so a quick
+  // look on the phone tells you whether the new version has arrived.
+  const APP_VERSION = '5.1';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1997,6 +2004,7 @@
   }
 
   document.documentElement.style.setProperty('--read-size', prefs.size + 'px');
+  $('appVersion').textContent = 'v' + APP_VERSION;
   showRate();
   setPlayIcon();
   renderLibrary();
