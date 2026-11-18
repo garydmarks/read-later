@@ -296,10 +296,15 @@
   }
   .collapsed .controls { transform: translateY(100%); }
   .controls-inner { max-width: 680px; margin: 0 auto; }
+  /* The hide button across the top of the bar: a down arrow, 44px tall (Apple's minimum tap size), with a
+     4px gap above the drag bar. It used to be a thin 22px handle sitting right on the drag bar, so a swipe
+     meant to hide the controls often started on the drag bar and moved the page instead (Gary, 2026-11-18).
+     Gray arrow on the bar: 6.3:1 contrast (light) and 6.5:1 (dark), above the 3:1 asked for on controls. */
   .grabber {
-    display: block; width: 100%; height: 22px; padding: 0; border: 0; background: none;
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 44px; margin-bottom: 4px; padding: 0; border: 0; background: none; color: var(--muted);
   }
-  .grabber span { display: block; width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto; }
+  .grabber svg { width: 24px; height: 24px; }
   .progress-text { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 0 0 8px; }
   /* The drag bar: a 32px-tall touch zone around the thin progress line, so a thumb can grab it */
   .scrub { height: 32px; display: flex; align-items: center; padding: 0 8px; margin: 0 -8px; touch-action: none; }
@@ -492,7 +497,10 @@
 
   <div id="controls" class="controls">
     <div class="controls-inner">
-      <button id="grabber" class="grabber" type="button" aria-label="Hide controls"><span></span></button>
+      <!-- Tap (or swipe down on the bar) to hide the controls -->
+      <button id="grabber" class="grabber" type="button" aria-label="Hide controls">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
       <!-- Drag along this bar (or tap it) to move through the document: the very left is the top, the
            very right is the end. The colored part is how far you've read; the dot is where you're looking. -->
       <div id="scrub" class="scrub" role="slider" tabindex="0" aria-label="Move through the document"
@@ -504,7 +512,7 @@
       </div>
       <div class="progress-text"><span id="posText"></span><span id="leftText"></span></div>
       <div class="transport">
-        <button id="speedChip" class="chip" type="button" aria-label="Change speed"></button>
+        <button id="speedChip" class="chip" type="button" aria-label="Speed. Opens Options to change it"></button>
         <div class="transport-mid">
           <button id="prevBtn" class="round" type="button" aria-label="Back one sentence">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 6h2v12H6zM20 6v12l-9-6z"/></svg>
@@ -625,7 +633,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '5.7';
+  const APP_VERSION = '5.8';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1927,7 +1935,6 @@
   });
 
   // ---------- Speed ----------
-  const SPEED_STEPS = [1, 1.25, 1.5, 1.75, 2];
   function setRate(r) {
     prefs.rate = Math.round(Math.max(0.5, Math.min(2, r)) * 100) / 100;
     savePrefs();
@@ -1938,6 +1945,8 @@
   function showRate() {
     const label = (prefs.rate % 1 === 0 ? prefs.rate.toFixed(1) : String(prefs.rate)) + '×';
     $('speedChip').textContent = label;
+    // VoiceOver reads the label, not the visible text, so the label carries the speed too
+    $('speedChip').setAttribute('aria-label', 'Speed ' + label + '. Opens Options to change it');
     $('rateText').textContent = label;
     $('rateInput').value = prefs.rate;
   }
@@ -2189,10 +2198,10 @@
   $('showControls').addEventListener('click', () => { if (Date.now() - collapsedAt >= ARROW_SETTLE_MS) setCollapsed(false); });
   onSwipe($('showControls'), null, () => setCollapsed(false));
 
-  $('speedChip').addEventListener('click', () => {
-    const next = SPEED_STEPS.find(s => s > prefs.rate + 0.001);
-    setRate(next || SPEED_STEPS[0]);
-  });
+  // The speed button shows the current speed and opens Options, where speed is the first setting
+  // (fine 0.05 steps). It used to jump 1.0 > 1.25 > ... > 2.0 > back to 1.0 on each tap: too big a
+  // jump, and an accidental tap changed the speed mid-listen (Gary, 2026-11-18).
+  $('speedChip').addEventListener('click', openSheet);
   $('optsBtn').addEventListener('click', openSheet);
   $('sheetDone').addEventListener('click', closeSheet);
   $('backdrop').addEventListener('click', closeSheet);
