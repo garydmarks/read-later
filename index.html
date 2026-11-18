@@ -529,7 +529,7 @@
     <button id="shareMarked" class="btn-secondary go" type="button">Export with highlights and notes</button>
     <button id="sharePlain" class="btn-secondary" type="button">Export plain text</button>
     <!-- Copies the document's words only (no highlights or notes), ready to paste anywhere -->
-    <button id="copyText" class="btn-secondary" type="button">Copy all text</button>
+    <button id="copyText" class="btn-secondary" type="button">Copy plain text</button>
     <button id="renameBtn" class="btn-secondary" type="button">Rename this document</button>
     <!-- Which version is running, so you can tell whether an update has reached the phone -->
     <p id="appVersion" class="hint version"></p>
@@ -578,7 +578,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '5.4';
+  const APP_VERSION = '5.5';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -2042,13 +2042,13 @@
   $('marksBtn').addEventListener('click', openList);
   $('shareMarked').addEventListener('click', () => shareDoc(true));
   $('sharePlain').addEventListener('click', () => shareDoc(false));
-  // Copy all text: the whole document exactly as it was saved (text only, no highlights or notes).
+  // Copy plain text: the whole document exactly as it was saved (text only, no highlights or notes).
   $('copyText').addEventListener('click', async () => {
     if (!cur) return;
     try {
       await navigator.clipboard.writeText(cur.text);
       closeSheet();
-      toast('Copied the whole document (text only).');
+      toast('Copied the whole document as plain text (no highlights or notes).');
     } catch (e) {
       toast('Couldn’t copy. Try again, or use Export plain text.');
     }
