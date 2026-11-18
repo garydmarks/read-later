@@ -263,7 +263,17 @@
     display: block; width: 100%; height: 22px; padding: 0; border: 0; background: none;
   }
   .grabber span { display: block; width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto; }
-  .progress-text { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 6px 0 8px; }
+  .progress-text { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+  /* The drag bar: a 32px-tall touch zone around the thin progress line, so a thumb can grab it */
+  .scrub { height: 32px; display: flex; align-items: center; padding: 0 8px; margin: 0 -8px; touch-action: none; }
+  .scrub-track { position: relative; flex: 1; }
+  .scrub.dragging .bar { height: 6px; }
+  .scrub-knob {
+    position: absolute; top: 50%; left: 0; width: 18px; height: 18px; margin: -9px 0 0 -9px;
+    border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); box-shadow: var(--shadow);
+    pointer-events: none;
+  }
+  .scrub.dragging .scrub-knob { transform: scale(1.25); }
   .transport { display: flex; align-items: center; justify-content: space-between; }
   .transport-mid { display: flex; align-items: center; gap: 18px; }
   .round {
@@ -445,7 +455,15 @@
   <div id="controls" class="controls">
     <div class="controls-inner">
       <button id="grabber" class="grabber" type="button" aria-label="Hide controls"><span></span></button>
-      <div class="bar"><i id="posBar"></i></div>
+      <!-- Drag along this bar (or tap it) to move through the document: the very left is the top, the
+           very right is the end. The colored part is how far you've read; the dot is where you're looking. -->
+      <div id="scrub" class="scrub" role="slider" tabindex="0" aria-label="Move through the document"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="scrub-track">
+          <div class="bar"><i id="posBar"></i></div>
+          <span id="scrubKnob" class="scrub-knob"></span>
+        </div>
+      </div>
       <div class="progress-text"><span id="posText"></span><span id="leftText"></span></div>
       <div class="transport">
         <button id="speedChip" class="chip" type="button" aria-label="Change speed"></button>
@@ -558,7 +576,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '5.2';
+  const APP_VERSION = '5.3';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1296,6 +1314,7 @@
     const wordsLeft = cur.pos >= sents.length ? 0 : sents.totalWords - sents[cur.pos].w;
     $('leftText').textContent = cur.pos >= sents.length ? 'Finished' : minutesLabel(wordsLeft);
     $('posBar').style.width = pct + '%';
+    updateKnob();
     for (const el of $('readerText').querySelectorAll('.s')) {
       const i = +el.dataset.i;
       el.classList.toggle('now', i === cur.pos);
@@ -1368,12 +1387,87 @@
   // Your finger scrolled the page: stop following if the spot went off screen, start again if it came back.
   window.addEventListener('scroll', () => {
     if (currentView() !== 'readerView' || !cur) return;
+    updateKnob();
     if (Date.now() < autoScrollUntil) return;
     const r = curRect();
     const strip = visibleStrip();
     follow = !!r && r.bottom > strip.top && r.top < strip.bottom;
     updatePill();
   }, { passive: true });
+
+  // ---------- Drag through the document (the bar above the Play button) ----------
+  // Like the slider in a book or audiobook app: drag (or tap) anywhere along it to move the page;
+  // the far left is the top and the far right is the end. It only moves the view, like Search:
+  // your reading spot stays put, and "Back to reading spot" brings you back.
+  const maxScroll = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  function viewFrac() {
+    const m = maxScroll();
+    return m ? Math.min(1, Math.max(0, window.scrollY / m)) : 0;
+  }
+  // The dot shows where you're looking (the colored line shows how far you've read).
+  function updateKnob() {
+    const f = viewFrac();
+    $('scrubKnob').style.left = (f * 100) + '%';
+    $('scrub').setAttribute('aria-valuenow', String(Math.round(f * 100)));
+  }
+  // The sentence in the middle of the visible strip (a quick halving search, not a scan of every sentence).
+  function sentenceAtView() {
+    const strip = visibleStrip();
+    const y = (strip.top + strip.bottom) / 2;
+    let lo = 0, hi = sents.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sentEls[mid].getBoundingClientRect().bottom < y) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+  let scrubbing = false;
+  function scrubTo(clientX) {
+    const r = document.querySelector('#scrub .scrub-track').getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    follow = false;        // you moved away on purpose: reading carries on without pulling the page back
+    autoScrollUntil = 0;
+    window.scrollTo(0, Math.round(f * maxScroll()));
+    updateKnob();
+    $('posText').textContent = 'Viewing sentence ' + (sentenceAtView() + 1) + ' of ' + sents.length;
+  }
+  function endScrub() {
+    if (!scrubbing) return;
+    scrubbing = false;
+    $('scrub').classList.remove('dragging');
+    updateProgress(); // puts "Sentence N of M" (your reading spot) back
+    // Following again only if the reading spot is on screen where you let go.
+    const r = curRect(), strip = visibleStrip();
+    follow = !!r && r.bottom > strip.top && r.top < strip.bottom;
+    updatePill();
+  }
+  $('scrub').addEventListener('pointerdown', (e) => {
+    if (!cur) return;
+    e.preventDefault();
+    scrubbing = true;
+    try { $('scrub').setPointerCapture(e.pointerId); } catch (err) { /* keeps working without capture */ }
+    $('scrub').classList.add('dragging');
+    scrubTo(e.clientX);
+  });
+  $('scrub').addEventListener('pointermove', (e) => { if (scrubbing) scrubTo(e.clientX); });
+  $('scrub').addEventListener('pointerup', endScrub);
+  $('scrub').addEventListener('pointercancel', endScrub);
+  $('scrub').addEventListener('lostpointercapture', endScrub);
+  // Keyboard: arrows move a tenth of the way, Home and End go to the top and the end.
+  $('scrub').addEventListener('keydown', (e) => {
+    const step = { ArrowLeft: -0.1, ArrowDown: -0.1, ArrowRight: 0.1, ArrowUp: 0.1 }[e.key];
+    let f = null;
+    if (step) f = viewFrac() + step;
+    if (e.key === 'Home') f = 0;
+    if (e.key === 'End') f = 1;
+    if (f === null) return;
+    e.preventDefault();
+    follow = false;
+    autoScrollUntil = 0;
+    window.scrollTo(0, Math.round(Math.min(1, Math.max(0, f)) * maxScroll()));
+    updateKnob();
+    updatePill();
+  });
 
   // ---------- Hiding and showing the controls ----------
   let fadeTimer = 0;
@@ -1391,7 +1485,9 @@
   // Calls onDown / onUp when a finger swipes down or up on the element.
   function onSwipe(el, onDown, onUp) {
     let y0 = null;
-    el.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; }, { passive: true });
+    // A drag on the document bar is never a swipe: a finger drifting down while dragging sideways
+    // must not hide the controls.
+    el.addEventListener('touchstart', (e) => { y0 = e.target.closest('.scrub') ? null : e.touches[0].clientY; }, { passive: true });
     el.addEventListener('touchend', (e) => {
       if (y0 === null) return;
       const dy = e.changedTouches[0].clientY - y0;
