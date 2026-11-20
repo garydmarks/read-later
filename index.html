@@ -746,7 +746,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '6.4';
+  const APP_VERSION = '6.5';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1447,8 +1447,12 @@
       if (!text || !text.trim()) { toast('Your clipboard is empty. Copy some text first.'); return; }
       addDoc(text);
     } catch (e) {
-      openManual();
-      toast('Couldn’t read the clipboard. Paste into the box instead.');
+      // v6.5 (Gary, 2026-11-20): after a manual copy in Outlook, iPhone sometimes shows its big
+      // "Allow Paste" box, and the read fails even after Allow. Tapping the button again works,
+      // so say that and stay on this screen (before, this opened the typing box). The code at the
+      // end is iPhone's own reason, so a screenshot of a failure tells us what actually happened.
+      const code = (e && e.name) || 'unknown';
+      toast('iPhone stopped that paste. Tap Read copied text again, or use Type or paste. (Code: ' + code + ')', 8000);
     }
   }
   // ---------- Add from a file (PDF, Word .docx, or plain text) ----------
