@@ -25,7 +25,10 @@ self.addEventListener('activate', (event) => {
 // How long to wait for the internet before opening the saved copy. On weak signal (a subway, plane
 // Wi-Fi) a request can hang for a long time without failing, which used to leave a blank screen.
 const NET_WAIT_MS = 3000;
-const fromCache = (req) => caches.match(req).then((hit) => hit || caches.match('index.html'));
+// The saved copy of what was asked for. Opening the app itself (a "navigation") with no exact match
+// falls back to the saved app page; a picture or other file never does (an icon answered with a web
+// page is worse than no icon).
+const fromCache = (req) => caches.match(req).then((hit) => hit || (req.mode === 'navigate' ? caches.match('index.html') : undefined));
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
@@ -41,9 +44,25 @@ self.addEventListener('fetch', (event) => {
     // publishing, even after closing and reopening the app (Gary, iPhone, 2026-11-17).
     fetch(req, { cache: 'no-cache' })
       .then((res) => {
-        const copy = res.clone();
-        if (res.ok) caches.open(CACHE).then((c) => c.put(req, copy));
-        answer(res);
+        // A redirect (the app's address moved) is passed on as it is, so the phone follows it.
+        if (res.type === 'opaqueredirect') { answer(res); return; }
+        if (res.ok) {
+          // Both copies are made now, before the page starts reading the answer (a used answer can't be copied).
+          const copy = res.clone();
+          // A fresh app page also refreshes the fallback copy, which used to stay frozen at the
+          // version the phone first installed (app review, 2026-11-19).
+          const fallback = req.mode === 'navigate' ? res.clone() : null;
+          caches.open(CACHE).then((c) => {
+            c.put(req, copy);
+            if (fallback) c.put('index.html', fallback);
+          });
+          answer(res);
+          return;
+        }
+        // GitHub answered with an error page (404, 500, 503: Pages down or a setting changed).
+        // Show the saved copy instead, so the library still opens; only if there is none, pass the
+        // error through (app review, 2026-11-19: an outage used to replace the app with GitHub's page).
+        fromCache(req).then((hit) => answer(hit || res));
       })
       .catch((err) => fromCache(req).then((hit) => {
         if (hit) answer(hit);

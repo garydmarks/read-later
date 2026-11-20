@@ -176,6 +176,28 @@
   .empty { color: var(--muted); padding: 16px 0; font-size: 16px; }
   .danger-link { color: var(--danger); margin-top: 24px; }
 
+  /* Backup section and storage meter */
+  .storage-bar { margin: 8px 0 12px; }
+  .storage-bar.nearly-full > i { background: var(--danger); }
+  .backup-item { display: grid; gap: 6px; margin-bottom: 16px; }
+  .backup-item .btn-secondary { width: 100%; min-height: 48px; }
+
+  /* Undo after a delete: a dark bar along the bottom of the library (same colors as the toast) */
+  .undo-bar {
+    position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 20;
+    max-width: 648px; margin: 0 auto;
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 6px 6px 16px; border-radius: 14px;
+    background: var(--ink); color: var(--bg); box-shadow: var(--shadow); font-size: 15px;
+  }
+  .undo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .undo-btn {
+    flex: none; min-width: 72px; min-height: 44px; padding: 0 16px; border-radius: 10px; /* 44px: Apple's minimum tap size */
+    border: 1px solid var(--bg); background: none; color: var(--bg); font-weight: 700;
+  }
+  /* Room under the list so the Undo bar never covers the last buttons */
+  #libraryView.has-undo { padding-bottom: calc(env(safe-area-inset-bottom) + 96px); }
+
   /* ---------- Top bar (reading page) ---------- */
   .topbar {
     position: sticky; top: 0; z-index: 5;
@@ -449,6 +471,29 @@
   <ul id="docList" class="doc-list"></ul>
   <p id="emptyMsg" class="empty" hidden>Nothing saved yet.</p>
   <button id="deleteAll" class="link-btn danger-link" type="button" hidden>Delete all documents</button>
+
+  <!-- Backup: one file with every document, highlight and note (save it to Files or OneDrive) -->
+  <h2 class="section-label">Backup</h2>
+  <p id="storageMeter" class="hint"></p>
+  <div class="bar storage-bar" aria-hidden="true"><i id="storageFill"></i></div>
+  <!-- Each button says what it does right under it, so nobody has to press it to find out
+       (Gary, 2026-11-19). No pop-up before them: the Share screen and the file picker must open
+       straight from the tap, or the iPhone may refuse to open them. -->
+  <div class="backup-item">
+    <button id="backupBtn" class="btn-secondary" type="button">Save a backup file</button>
+    <p class="hint">Makes one file holding every document, highlight and note. The Share screen opens: choose Save to Files (or OneDrive) to keep it safe.</p>
+  </div>
+  <div class="backup-item">
+    <button id="restoreBtn" class="btn-secondary" type="button">Restore from a backup file</button>
+    <p class="hint">Pick a backup file you saved earlier. Documents in it that aren’t on this phone are added back. Nothing already here is changed or deleted.</p>
+  </div>
+  <input id="restoreFile" type="file" accept=".json,application/json" hidden>
+
+  <!-- Undo after a delete. Stays until you add a new document or close the app. -->
+  <div id="undoBar" class="undo-bar" role="status" hidden>
+    <span id="undoText" class="undo-text"></span>
+    <button id="undoBtn" class="undo-btn" type="button">Undo</button>
+  </div>
 </main>
 
 <!-- ===================== Reader ===================== -->
@@ -633,7 +678,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '5.8';
+  const APP_VERSION = '5.9';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -673,21 +718,33 @@
       return fallback;
     }
   }
-  function writeJSON(key, value) {
+  // quiet = an automatic save (your reading spot, saved after every sentence). When storage is full,
+  // those say so once, not after every sentence; the notice comes back only after a save has worked
+  // again. A save you started yourself (highlight, rename, pin, delete) always says when it failed.
+  // (App review, 2026-11-19: a full phone showed the same notice every few seconds while reading.)
+  let quietFailShown = false;
+  function writeJSON(key, value, quiet) {
     if (brokenKeys.has(key)) { // don't save over data we failed to read, and say so instead of failing silently
       toast(key === DOCS_KEY ? 'Saved documents could not be read, so changes can’t be saved.'
         : 'Saved settings could not be read, so this change lasts only until you close the app.');
       return false;
     }
-    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
-    catch (e) { toast('Phone storage is full. Delete an old document and try again.'); return false; }
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      quietFailShown = false;
+      return true;
+    } catch (e) {
+      if (!quiet || !quietFailShown) toast('Phone storage is full. Delete an old document and try again.');
+      if (quiet) quietFailShown = true;
+      return false;
+    }
   }
 
   let docs = readJSON(DOCS_KEY, []);           // [{id, title, text, total, pos, created, updated}]
   // voiceURI: null = pick the best one automatically, '' = the iPhone's default voice
   // theme: 'auto' (follow the iPhone), 'light' or 'dark' (Options > Appearance)
   const prefs = Object.assign({ rate: 1, voiceURI: null, size: 21, theme: 'auto' }, readJSON(PREFS_KEY, {}));
-  const saveDocs = () => writeJSON(DOCS_KEY, docs);
+  const saveDocs = (quiet) => writeJSON(DOCS_KEY, docs, quiet);
 
   // Asks the iPhone to treat this app's saved documents as important, so it won't clear them
   // when the phone runs low on space. The phone decides; the app works the same either way.
@@ -831,10 +888,8 @@
       del.setAttribute('aria-label', 'Delete ' + d.title);
       del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
       del.addEventListener('click', () => {
-        if (!confirm('Delete "' + d.title + '"? This can’t be undone.')) return;
-        docs = docs.filter(x => x.id !== d.id);
-        saveDocs();
-        renderLibrary();
+        if (!confirm('Delete "' + d.title + '"? You can undo this until you add a new document or close the app.')) return;
+        deleteDocs(docs.filter(x => x.id === d.id), 'Deleted “' + clip(d.title, 40) + '”');
       });
 
       // Pin button: tap to keep this document at the top (doesn't count as "using" it, so the order below stays put).
@@ -855,6 +910,187 @@
     }
     $('emptyMsg').hidden = docs.length > 0;
     $('deleteAll').hidden = docs.length === 0;
+    showStorage();
+  }
+
+  // ---------- Undo after a delete ----------
+  // Every delete (one document, or Delete all) goes on this list, newest last. Undo puts back the
+  // newest one, then the next, and so on. The list lives only in memory: it ends when you add a new
+  // document or close the app (restoring a backup leaves it alone; see importBackup). The deleted records are kept whole, so their
+  // highlights, notes, reading spot, pin and place in the list all come back. (Gary, 2026-11-19.)
+  const undoList = [];
+  function showUndo() {
+    const top = undoList[undoList.length - 1];
+    $('undoBar').hidden = !top;
+    $('libraryView').classList.toggle('has-undo', !!top);
+    if (top) $('undoText').textContent = top.label;
+  }
+  function clearUndo() { undoList.length = 0; showUndo(); }
+  // Removes the given documents, saves, and offers Undo. If the save fails, nothing is removed.
+  function deleteDocs(removed, label) {
+    if (!removed.length) return;
+    const before = docs;
+    docs = docs.filter(x => !removed.includes(x));
+    if (!saveDocs()) { docs = before; return; } // saveDocs has already said why
+    undoList.push({ label, removed });
+    renderLibrary();
+    showUndo();
+  }
+  function undoDelete() {
+    const top = undoList[undoList.length - 1];
+    if (!top) return;
+    const before = docs;
+    docs = docs.concat(top.removed.filter(r => !docs.some(d => d.id === r.id)));
+    if (!saveDocs()) { docs = before; return; } // still undoable once there's room
+    undoList.pop();
+    renderLibrary();
+    showUndo();
+  }
+
+  // ---------- Storage meter ----------
+  // How much of this app's space the saved documents use. Safari keeps about 5 MB for each site's
+  // page storage (localStorage) and counts 2 bytes per character, as other browsers do. The exact
+  // limit is Safari's, so the meter says "about".
+  const STORAGE_LIMIT = 5 * 1024 * 1024;
+  function storageUsed() {
+    let chars = 0;
+    try {
+      for (const k of [DOCS_KEY, PREFS_KEY]) {
+        const v = localStorage.getItem(k);
+        if (v !== null) chars += k.length + v.length;
+      }
+    } catch (e) { return null; }
+    return chars * 2;
+  }
+  function showStorage() {
+    const used = storageUsed();
+    if (used === null) { $('storageMeter').textContent = 'Storage use can’t be read on this phone.'; return; }
+    const label = used < 1000 * 1024 ? Math.max(1, Math.round(used / 1024)) + ' KB' : (used / 1024 / 1024).toFixed(1) + ' MB';
+    const pct = Math.min(100, Math.round(used / STORAGE_LIMIT * 100));
+    $('storageMeter').textContent = 'Saved documents use ' + label + ' of about 5 MB (' + pct + '%).'
+      + (pct >= 80 ? ' Nearly full: save a backup, then delete old documents.' : '');
+    $('storageFill').style.width = pct + '%';
+    $('storageFill').parentElement.classList.toggle('nearly-full', pct >= 80);
+  }
+
+  // ---------- Backup file (save the whole library, and restore it) ----------
+  const BACKUP_FORMAT = 1;
+  function backupJSON() {
+    return JSON.stringify({ app: 'read-later', format: BACKUP_FORMAT, version: APP_VERSION, exported: Date.now(), docs });
+  }
+  async function saveBackup() {
+    if (!docs.length) { toast('Nothing to back up yet.'); return; }
+    const day = new Date().toISOString().slice(0, 10);
+    const file = new File([backupJSON()], 'Read Later backup ' + day + '.json', { type: 'application/json' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Read Later backup' }); return; }
+      saveFile(file);
+      // This phone wouldn't share the file, so it was handed to the browser to download. That can
+      // fail without a sign, so say what to look for (fix check, 2026-11-19).
+      toast('Look for “' + file.name + '” in Files > Downloads. If it isn’t there, the backup wasn’t saved.', 8000);
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // you closed the Share screen
+      toast('Couldn’t open the Share screen. Try again.');
+    }
+  }
+  // A backup file is checked piece by piece before anything is saved: only the fields the app makes
+  // are kept, in their original order, and ids and colors must look exactly like the app's own.
+  // That keeps a damaged or tampered file from putting a script into a later Export.
+  const SAFE_ID = /^[a-z0-9]{1,40}$/;
+  const isNat = (v) => Number.isInteger(v) && v >= 0;
+  const DOC_FIELDS = {
+    id: (v) => typeof v === 'string' && SAFE_ID.test(v),
+    title: (v) => typeof v === 'string' && v.length <= 200,
+    text: (v) => typeof v === 'string' && v.trim().length > 0,
+    total: isNat, pos: isNat,
+    created: Number.isFinite, updated: Number.isFinite,
+    pinned: (v) => typeof v === 'boolean',
+    marksFor: isNat,
+  };
+  const MARK_FIELDS = {
+    id: (v) => typeof v === 'string' && SAFE_ID.test(v),
+    s: isNat, a: isNat, e: isNat, b: isNat,
+    c: (v) => Object.prototype.hasOwnProperty.call(EXPORT_COLORS, v),
+    note: (v) => typeof v === 'string', q: (v) => typeof v === 'string',
+  };
+  const REQUIRED_DOC = ['id', 'title', 'text', 'pos', 'created', 'updated'];
+  const REQUIRED_MARK = Object.keys(MARK_FIELDS);
+  function pick(src, fields, required) {
+    if (!src || typeof src !== 'object' || Array.isArray(src)) return null;
+    for (const k of required) if (!(k in src)) return null;
+    const out = {};
+    for (const k of Object.keys(src)) {
+      if (k === 'marks' && fields === DOC_FIELDS) continue; // handled by cleanDoc
+      // hasOwnProperty, not "in": "in" also sees names every object has (toString, constructor),
+      // which let junk fields through and made "__proto__" crash the whole restore.
+      if (!Object.prototype.hasOwnProperty.call(fields, k)) continue; // unknown field: dropped
+      if (!fields[k](src[k])) return null;                  // bad value: the whole record is refused
+      out[k] = src[k];
+    }
+    return out;
+  }
+  function cleanDoc(d) {
+    const out = pick(d, DOC_FIELDS, REQUIRED_DOC);
+    if (!out) return null;
+    if ('marks' in d) {
+      if (!Array.isArray(d.marks)) return null;
+      const marks = d.marks.map(m => pick(m, MARK_FIELDS, REQUIRED_MARK));
+      if (marks.some(m => !m)) return null;
+      // Put marks back where they were in the record, so a restored record is identical to the saved one.
+      const ordered = {};
+      for (const k of Object.keys(d)) if (k === 'marks') ordered.marks = marks; else if (Object.prototype.hasOwnProperty.call(out, k)) ordered[k] = out[k];
+      return ordered;
+    }
+    return out;
+  }
+  // Adds every valid document from a backup that isn't already here (same id or same text).
+  // Returns {added, skipped, bad} or {error}. Nothing already saved is ever changed or removed.
+  function importBackup(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { return { error: 'not-backup', added: 0 }; }
+    if (!data || data.app !== 'read-later' || !Array.isArray(data.docs)) return { error: 'not-backup', added: 0 };
+    if (data.format > BACKUP_FORMAT) return { error: 'newer', added: 0 };
+    // While a delete can still be undone, restoring waits: Undo first. Restoring on top of a
+    // pending Delete all could fill the phone's storage so the Undo itself couldn't be saved
+    // (second fix check, 2026-11-19).
+    if (undoList.length) return { error: 'undo-pending', added: 0 };
+    let skipped = 0, bad = 0, inUndo = 0;
+    const incoming = [];
+    // A document you deleted a moment ago (still on the Undo list) is NOT restored from the file:
+    // the file's copy is older, and Undo brings back the newest one, highlights and all. Restoring
+    // also leaves the Undo list alone. (Fix check, 2026-11-19: a restore after a mistaken Delete all
+    // used to clear Undo, losing everything newer than the backup.)
+    const deletedNow = undoList.flatMap(u => u.removed);
+    for (const raw of data.docs) {
+      const d = cleanDoc(raw);
+      if (!d) { bad++; continue; }
+      const dup = (x) => x.id === d.id || x.text === d.text;
+      if (deletedNow.some(dup)) { inUndo++; continue; }
+      if (docs.some(dup) || incoming.some(dup)) { skipped++; continue; }
+      incoming.push(d);
+    }
+    if (incoming.length) {
+      const before = docs;
+      docs = docs.concat(incoming);
+      if (!saveDocs()) { docs = before; return { error: 'not-saved', added: 0, skipped, bad, inUndo }; }
+      askToKeepData();
+    }
+    renderLibrary();
+    return { added: incoming.length, skipped, bad, inUndo };
+  }
+  async function restoreFromFile(file) {
+    let res;
+    try { res = importBackup(await file.text()); } catch (e) { res = { error: 'unreadable', added: 0 }; }
+    if (res.error === 'not-saved') return; // saveDocs has already said why
+    if (res.error === 'undo-pending') { toast('First tap Undo at the bottom to bring back what you just deleted, then restore. (Or add a document, which ends Undo.)', 8000); return; }
+    if (res.error === 'newer') { toast('That backup was made by a newer Read Later. Open the app with internet to update it first.', 6000); return; }
+    if (res.error) { toast('That file isn’t a Read Later backup.'); return; }
+    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    let msg = res.added ? 'Restored ' + plural(res.added, 'document') + '.' : 'Nothing new to restore.';
+    if (res.skipped) msg += ' ' + plural(res.skipped, 'document') + ' already here.';
+    if (res.bad) msg += ' ' + plural(res.bad, 'damaged document') + ' left out.';
+    if (res.inUndo) msg += ' ' + plural(res.inUndo, 'document') + ' you just deleted: tap Undo to bring back the newest copy.';
+    toast(msg, 8000);
   }
 
   function addDoc(text) {
@@ -875,6 +1111,7 @@
     };
     docs.push(doc);
     if (!saveDocs()) { docs.pop(); return; }
+    clearUndo(); // a new document ends the chance to undo earlier deletes (Gary, 2026-11-19)
     askToKeepData(); // a tap just happened, which some phones want before saying yes
     openDoc(doc.id);
   }
@@ -918,9 +1155,20 @@
     noteId = null;
     cur = docs.find(d => d.id === id);
     if (!cur) return;
+    const oldTotal = cur.total;
     sents = toSentences(cur.text);
     cur.total = sents.length;
-    if (cur.pos >= sents.length) cur.pos = 0; // finished? start over
+    // A finished document stays finished until you press Play (play() starts it over). It used to be
+    // reset to the top here, so just opening it and going Back turned "Finished" into "0% read".
+    // A spot past the end of a text that now splits into fewer sentences (an app or iPhone update)
+    // keeps you at the last sentence instead of sending you back to the top. (App review, 2026-11-19.)
+    if (cur.pos >= oldTotal) cur.pos = sents.length;
+    else if (cur.pos >= sents.length) cur.pos = sents.length - 1;
+    // Highlights are painted only if each one's saved words still match the text at its saved spot.
+    marksTrusted = !cur.marks || cur.marks.every(marksLineUp);
+    if (cur.marks && cur.marks.length && !marksOk()) {
+      toast('Highlights in this document can’t be shown after an app or iPhone update, and new ones can’t be added to it. They’re still listed in Highlights and notes.', 7000);
+    }
     $('readerTitle').textContent = cur.title;
     renderSentences($('readerText'), 0);
     closeSheet();
@@ -961,12 +1209,24 @@
   // it starts at sentence s, character a, and ends at sentence e, character b (end not included).
   // c = color, note = your note, q = the highlighted words (kept so the list can always show them).
   // marksFor = how many sentences the document had when the highlights were made. If a later
-  // version of the app ever splits the text differently, the highlights stay in the list
-  // but are not painted, so they can never land on the wrong words.
+  // version of the app (or of the iPhone's own sentence rules) ever splits the text differently,
+  // the highlights stay in the list but are not painted, so they can never land on the wrong words.
+  // The count alone can't see a split that moved but kept the same number of sentences, so each
+  // highlight's saved words (q) are also compared with the text at its saved spot (marksTrusted,
+  // set when a document opens). App review, 2026-11-19.
   const byPos = (x, y) => cmp(x.s, x.a, y.s, y.a);
   function cmp(s1, a1, s2, a2) { return (s1 - s2) || (a1 - a2); }
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  const marksOk = () => !!cur && (!cur.marks || !cur.marks.length || cur.marksFor === sents.length);
+  let marksTrusted = true;
+  const marksOk = () => !!cur && (!cur.marks || !cur.marks.length || (cur.marksFor === sents.length && marksTrusted));
+  // Spaces are evened out before comparing, so a difference in spacing alone never hides a highlight.
+  const sameWords = (x, y) => String(x).replace(/\s+/g, ' ').trim() === String(y).replace(/\s+/g, ' ').trim();
+  function marksLineUp(m) {
+    const n = sents.length;
+    const ok = [m.s, m.a, m.e, m.b].every(v => Number.isInteger(v) && v >= 0)
+      && m.s <= m.e && m.e < n && m.a <= sents[m.s].t.length && m.b <= sents[m.e].t.length;
+    return ok && sameWords(sliceText(m.s, m.a, m.e, m.b), m.q);
+  }
 
   // The words between two points, the same way they read on screen.
   function sliceText(s, a, e, b) {
@@ -1025,7 +1285,7 @@
   function saveMarks() {
     cur.marks.sort(byPos);
     cur.marksFor = sents.length;
-    savePos();
+    savePos(true); // your own edit: always say if it couldn't be saved
     renderSentences($('readerText'), 0);
     updateProgress();
   }
@@ -1384,10 +1644,12 @@
     }
   }
 
-  function savePos() {
-    if (!cur) return;
+  // loud = a change you made yourself (highlight, note, rename): a failed save always says so.
+  // Without it, this is the automatic save of your reading spot (see writeJSON's quiet).
+  function savePos(loud) {
+    if (!cur) return false;
     cur.updated = Date.now();
-    saveDocs();
+    return saveDocs(!loud);
   }
 
   // ---------- Following the sentence being read ----------
@@ -2065,10 +2327,16 @@
     addDoc(t);
   });
   $('deleteAll').addEventListener('click', () => {
-    if (!confirm('Delete all ' + docs.length + ' saved documents? This can’t be undone.')) return;
-    docs = [];
-    saveDocs();
-    renderLibrary();
+    if (!confirm('Delete all ' + docs.length + ' saved documents? You can undo this until you add a new document or close the app.')) return;
+    deleteDocs(docs.slice(), 'Deleted all ' + docs.length + (docs.length === 1 ? ' document' : ' documents'));
+  });
+  $('undoBtn').addEventListener('click', undoDelete);
+  $('backupBtn').addEventListener('click', saveBackup);
+  $('restoreBtn').addEventListener('click', () => $('restoreFile').click());
+  $('restoreFile').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // so picking the same file again still counts as a change
+    if (file) await restoreFromFile(file);
   });
 
   $('readerBack').addEventListener('click', () => { stop(); closeFind(); cur = null; renderLibrary(); show('libraryView'); });
@@ -2224,7 +2492,7 @@
     const name = prompt('Name for this document:', cur.title);
     if (!name || !name.trim()) return;
     cur.title = name.trim().slice(0, 80);
-    savePos();
+    savePos(true);
     $('readerTitle').textContent = cur.title;
   });
 
@@ -2253,7 +2521,8 @@
   // Test handle (used when checking the app on a computer).
   window.RL = {
     state: () => ({ view: currentView(), playing, pos: cur && cur.pos, total: sents.length, docs: docs.length, follow, collapsed: isCollapsed() }),
-    addDoc, openDoc, toSentences, speakable, shortlist, voiceLabel,
+    addDoc, openDoc, jumpTo, toSentences, speakable, shortlist, voiceLabel,
+    backupJSON, importBackup, storageUsed,
     marks: () => cur && cur.marks, addMark, readSelection, sliceText, marksAsText, openNote,
     exportHTML, exportMarkedText,
     find: (q) => { openFind(); $('findInput').value = q; runFind(q); return { n: finds.length, at: findAt }; },
