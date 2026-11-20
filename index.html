@@ -470,6 +470,13 @@
        button underneath, so "Tap Read copied text again" can be done at once, message or not. */
     pointer-events: none;
   }
+  /* v6.9 (Gary, 2026-11-20): what to do after a refused paste is a line in the page, under the
+     three add buttons. It is not a floating pop-up, so it can never sit on top of a button, and
+     the buttons above it don't move when it comes and goes. Same colors as the pop-up. */
+  .paste-msg {
+    margin: 12px 0 0; padding: 12px 16px; border-radius: 12px;
+    background: var(--ink); color: var(--bg); font-size: 15px;
+  }
 </style>
 </head>
 <body>
@@ -490,6 +497,9 @@
   </div>
   <!-- No hint line under these (v6.1): the file picker itself greys out files the app can't open -->
   <input id="addFile" type="file" accept=".pdf,.docx,.txt,.md,.text,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+
+  <!-- What to do after a refused paste (v6.9). In the page, below the buttons, so it covers nothing. -->
+  <p id="pasteMsg" class="paste-msg" role="status" hidden></p>
 
   <div id="manualBox" class="manual" hidden>
     <textarea id="manualText" placeholder="Press and hold here, then tap Paste."></textarea>
@@ -749,7 +759,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '6.8';
+  const APP_VERSION = '6.9';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -848,6 +858,7 @@
   const VIEWS = ['libraryView', 'readerView'];
   const currentView = () => VIEWS.find(id => !$(id).hidden);
   function show(viewId) {
+    pasteNote(''); // a paste message belongs to that moment; it shouldn't be waiting on the home screen later
     for (const id of VIEWS) $(id).hidden = id !== viewId;
     window.scrollTo(0, 0);
   }
@@ -1443,6 +1454,19 @@
     openDoc(doc.id);
   }
 
+  // v6.9 (Gary, 2026-11-20: the pop-up "still blocks the button for a period of time which should
+  // never happen"). The paste messages show in the page under the add buttons instead of in the
+  // floating pop-up, so the button they name is never covered. No timer: the message stays until
+  // the next paste works, the box is closed, another screen opens, or you leave the app, so nothing
+  // on the screen jumps by itself. pasteNote('') takes it away.
+  function pasteNote(msg) {
+    const p = $('pasteMsg');
+    if (!p) return;
+    p.textContent = msg;
+    p.hidden = !msg;
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pasteNote(''); });
+
   let pasteFailedAt = 0; // when the last paste was refused (0 = the last one worked)
   async function pasteFromClipboard() {
     try {
@@ -1452,7 +1476,8 @@
       // where in 6.5 the next tap worked. So v6.8 took it out.)
       const text = await navigator.clipboard.readText();
       pasteFailedAt = 0;
-      if (!text || !text.trim()) { toast('Your clipboard is empty. Copy some text first.'); return; }
+      if (!text || !text.trim()) { pasteNote('Your clipboard is empty. Copy some text first.'); return; }
+      pasteNote('');
       addDoc(text);
     } catch (e) {
       // v6.5 (Gary, 2026-11-20): after a manual copy in Outlook, iPhone sometimes shows its big
@@ -1466,10 +1491,10 @@
       if (again) {
         pasteFailedAt = 0;
         openManual();
-        toast('iPhone stopped it again. Press and hold in the box, then tap Paste.', 8000);
+        pasteNote('iPhone stopped it again. Press and hold in the box, then tap Paste.');
       } else {
         pasteFailedAt = Date.now();
-        toast('iPhone stopped that paste. Tap Read copied text again, or use Type or paste.', 8000);
+        pasteNote('iPhone stopped that paste. Tap Read copied text again, or use Type or paste.');
       }
     }
   }
@@ -1658,7 +1683,7 @@
   }
 
   function openManual() { $('manualBox').hidden = false; $('manualText').focus(); }
-  function closeManual() { $('manualBox').hidden = true; $('manualText').value = ''; }
+  function closeManual() { $('manualBox').hidden = true; $('manualText').value = ''; pasteNote(''); }
 
   // ---------- Reader state ----------
   let cur = null;        // the open document
