@@ -177,15 +177,17 @@
   .danger-link { color: var(--danger); margin-top: 12px; padding-left: 0; } /* padding-left 0: the words line up with the cards' left edge */
 
   /* Backup section and storage meter */
-  .storage-bar { margin: 8px 0 12px; }
+  #storageMeter { margin-top: 12px; }
+  .storage-bar { margin: 8px 0 0; }
   .storage-bar.nearly-full > i { background: var(--danger); }
   .backup-item { display: grid; gap: 6px; margin-bottom: 16px; }
   .backup-item .btn-secondary { width: 100%; min-height: 48px; }
 
-  /* Paste by hand / Add from a file, side by side under Paste and read. No side padding, so the
-     words line up with the left and right edges of the big button above (v6.1, Gary 2026-11-20). */
-  .add-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 16px; }
-  .add-row .link-btn { padding-left: 0; padding-right: 0; }
+  /* Paste by hand / Add from a file: two equal buttons under Paste and read, together exactly as
+     wide as it (v6.2, Gary 2026-11-20: the two text links sat off-center on the phone). Same
+     style as the Backup buttons, so every "secondary" action on this screen looks alike. */
+  .add-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .add-row .btn-secondary { padding: 0 8px; }
 
   /* Restore pick list: one row per document in the backup, each with a tick box */
   /* minmax(0, 1fr): a long title is cut with "…" instead of pushing the row off the screen */
@@ -481,8 +483,8 @@
   </button>
   <!-- Two other ways to add a document: type or paste into a box, or open a saved file -->
   <div class="add-row">
-    <button id="manualToggle" class="link-btn" type="button">Paste by hand instead</button>
-    <button id="addFileBtn" class="link-btn" type="button">Add from a file</button>
+    <button id="manualToggle" class="btn-secondary" type="button">Paste by hand</button>
+    <button id="addFileBtn" class="btn-secondary" type="button">Add from a file</button>
   </div>
   <!-- No hint line under these (v6.1): the file picker itself greys out files the app can't open -->
   <input id="addFile" type="file" accept=".pdf,.docx,.txt,.md,.text,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
@@ -498,12 +500,14 @@
   <h2 class="section-label">Saved</h2>
   <ul id="docList" class="doc-list"></ul>
   <p id="emptyMsg" class="empty" hidden>Nothing saved yet.</p>
+  <!-- Phone storage: how full the app's space on this iPhone is. Under the list it describes, not
+       under Backup (v6.2, Gary 2026-11-20: it read as if it were about OneDrive backups). -->
+  <p id="storageMeter" class="hint"></p>
+  <div id="storageBar" class="bar storage-bar" aria-hidden="true"><i id="storageFill"></i></div>
   <button id="deleteAll" class="link-btn danger-link" type="button" hidden>Delete all documents</button>
 
   <!-- Backup: one file with every document, highlight and note (save it to Files or OneDrive) -->
   <h2 class="section-label">Backup (all documents)</h2>
-  <p id="storageMeter" class="hint"></p>
-  <div class="bar storage-bar" aria-hidden="true"><i id="storageFill"></i></div>
   <!-- Each button gets one short line under it, only what the label can't say (Gary, 2026-11-20:
        clean, no needless explanation). No pop-up before them: the Share screen and the file picker
        must open straight from the tap, or the iPhone may refuse to open them. -->
@@ -739,7 +743,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '6.1';
+  const APP_VERSION = '6.2';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1062,12 +1066,14 @@
     return chars * 2;
   }
   function showStorage() {
+    // Nothing saved: no meter (the list already says "Nothing saved yet.")
+    $('storageMeter').hidden = $('storageBar').hidden = !docs.length;
     const used = storageUsed();
     if (used === null) { $('storageMeter').textContent = 'Storage use can’t be read on this phone.'; return; }
     const label = fmtBytes(used);
     const pct = Math.min(100, Math.round(used / STORAGE_LIMIT * 100));
     // Short, so it fits one line on a small phone (v6.1). The bar under it shows the percent.
-    $('storageMeter').textContent = label + ' used of about 5 MB.'
+    $('storageMeter').textContent = 'Phone storage: ' + label + ' of about 5 MB.'
       + (pct >= 80 ? ' Nearly full: back up, then delete old documents.' : '');
     $('storageFill').style.width = pct + '%';
     $('storageFill').parentElement.classList.toggle('nearly-full', pct >= 80);
