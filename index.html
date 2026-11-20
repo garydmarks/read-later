@@ -174,7 +174,7 @@
   .doc-pin[aria-pressed="true"] { color: var(--accent); }
   .doc-pin[aria-pressed="true"] svg { fill: currentColor; }
   .empty { color: var(--muted); padding: 16px 0; font-size: 16px; }
-  .danger-link { color: var(--danger); margin-top: 24px; }
+  .danger-link { color: var(--danger); margin-top: 12px; padding-left: 0; } /* padding-left 0: the words line up with the cards' left edge */
 
   /* Backup section and storage meter */
   .storage-bar { margin: 8px 0 12px; }
@@ -182,9 +182,10 @@
   .backup-item { display: grid; gap: 6px; margin-bottom: 16px; }
   .backup-item .btn-secondary { width: 100%; min-height: 48px; }
 
-  /* Paste by hand / Add from a file, side by side under Paste and read */
+  /* Paste by hand / Add from a file, side by side under Paste and read. No side padding, so the
+     words line up with the left and right edges of the big button above (v6.1, Gary 2026-11-20). */
   .add-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 16px; }
-  .add-hint { margin-top: -6px; }
+  .add-row .link-btn { padding-left: 0; padding-right: 0; }
 
   /* Restore pick list: one row per document in the backup, each with a tick box */
   /* minmax(0, 1fr): a long title is cut with "…" instead of pushing the row off the screen */
@@ -199,6 +200,9 @@
   .restore-row .r-meta { color: var(--muted); font-size: 14px; }
   #restoreFit.too-big { color: var(--danger); font-weight: 600; }
   #restoreGo:disabled { opacity: .45; }
+  /* Recently deleted list: same rows, with a Bring back button on the right */
+  .undo-row { align-items: center; padding-left: 0; padding-right: 0; } /* lines up with the heading and Done */
+  .undo-row .btn-secondary { flex: none; min-height: 44px; padding: 0 14px; }
 
   /* Undo after a delete: a dark bar along the bottom of the library (same colors as the toast) */
   .undo-bar {
@@ -480,7 +484,7 @@
     <button id="manualToggle" class="link-btn" type="button">Paste by hand instead</button>
     <button id="addFileBtn" class="link-btn" type="button">Add from a file</button>
   </div>
-  <p class="hint add-hint">Add from a file opens PDF, Word or text files.</p>
+  <!-- No hint line under these (v6.1): the file picker itself greys out files the app can't open -->
   <input id="addFile" type="file" accept=".pdf,.docx,.txt,.md,.text,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
 
   <div id="manualBox" class="manual" hidden>
@@ -505,11 +509,12 @@
        must open straight from the tap, or the iPhone may refuse to open them. -->
   <div class="backup-item">
     <button id="backupBtn" class="btn-secondary" type="button">Back up all documents</button>
-    <p class="hint">One file with every highlight and note. Save it to Files or OneDrive. <span id="lastBackup"></span></p>
+    <!-- Only the last-backup line: one short line (v6.1). The Share screen shows Files and OneDrive itself. -->
+    <p id="backupHint" class="hint"><span id="lastBackup"></span></p>
   </div>
   <div class="backup-item">
     <button id="restoreBtn" class="btn-secondary" type="button">Restore from a backup</button>
-    <p class="hint">Choose which documents come back. Nothing here is changed.</p>
+    <p id="restoreHint" class="hint">Pick which documents come back.</p>
   </div>
   <input id="restoreFile" type="file" accept=".json,application/json" hidden>
 
@@ -712,6 +717,19 @@
   </div>
 </div>
 
+<!-- ===================== Recently deleted: bring back any one delete ===================== -->
+<!-- Opens from Undo when more than one delete can still be undone (v6.1, Gary 2026-11-20) -->
+<div id="undoWrap" class="sheet-wrap" hidden>
+  <button id="undoBackdrop" class="backdrop" type="button" aria-label="Close list"></button>
+  <div class="sheet" role="dialog" aria-labelledby="undoTitle">
+    <div class="sheet-head">
+      <h2 id="undoTitle">Recently deleted</h2>
+      <button id="undoDone" class="sheet-done" type="button">Done</button>
+    </div>
+    <ul id="undoList" class="restore-list"></ul>
+  </div>
+</div>
+
 
 <div id="toast" class="toast" role="status" hidden></div>
 
@@ -721,7 +739,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '6.0';
+  const APP_VERSION = '6.1';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -958,16 +976,22 @@
   }
 
   // ---------- Undo after a delete ----------
-  // Every delete (one document, or Delete all) goes on this list, newest last. Undo puts back the
-  // newest one, then the next, and so on. The list lives only in memory: it ends when you add a new
-  // document or close the app (restoring a backup leaves it alone; see importBackup). The deleted records are kept whole, so their
-  // highlights, notes, reading spot, pin and place in the list all come back. (Gary, 2026-11-19.)
+  // Every delete (one document, or Delete all) goes on this list, newest last. The list lives only
+  // in memory: it ends when you add a new document or close the app (restoring a backup leaves it
+  // alone; see importBackup). The deleted records are kept whole, so their highlights, notes,
+  // reading spot, pin and place in the list all come back. (Gary, 2026-11-19.)
+  // v6.1 (Gary, 2026-11-20): any delete can come back on its own. With one delete, Undo brings it
+  // straight back. With more, Undo opens "Recently deleted", one Bring back button per delete, so
+  // you never have to undo the newer ones first.
   const undoList = [];
+  let deleteCount = 0; // goes up on every delete, never down (see addFromFile)
   function showUndo() {
-    const top = undoList[undoList.length - 1];
-    $('undoBar').hidden = !top;
-    $('libraryView').classList.toggle('has-undo', !!top);
-    if (top) $('undoText').textContent = top.label;
+    const n = undoList.length;
+    $('undoBar').hidden = !n;
+    $('libraryView').classList.toggle('has-undo', !!n);
+    if (n === 1) $('undoText').textContent = undoList[0].label;
+    if (n > 1) $('undoText').textContent = 'Deleted ' + plural(undoList.reduce((s, u) => s + u.removed.length, 0), 'document');
+    if (!$('undoWrap').hidden) { if (n) renderUndoList(); else $('undoWrap').hidden = true; }
   }
   function clearUndo() { undoList.length = 0; showUndo(); }
   // Removes the given documents, saves, and offers Undo. If the save fails, nothing is removed.
@@ -976,19 +1000,50 @@
     const before = docs;
     docs = docs.filter(x => !removed.includes(x));
     if (!saveDocs()) { docs = before; return; } // saveDocs has already said why
+    deleteCount++;
     undoList.push({ label, removed });
     renderLibrary();
     showUndo();
   }
-  function undoDelete() {
-    const top = undoList[undoList.length - 1];
-    if (!top) return;
+  // Puts back one delete (whichever one), leaving the others undoable.
+  function undoEntry(entry) {
+    const i = undoList.indexOf(entry);
+    if (i < 0) return;
     const before = docs;
-    docs = docs.concat(top.removed.filter(r => !docs.some(d => d.id === r.id)));
+    docs = docs.concat(entry.removed.filter(r => !docs.some(d => d.id === r.id)));
     if (!saveDocs()) { docs = before; return; } // still undoable once there's room
-    undoList.pop();
+    undoList.splice(i, 1);
     renderLibrary();
     showUndo();
+  }
+  function undoTap() {
+    if (undoList.length === 1) undoEntry(undoList[0]);
+    else if (undoList.length > 1) { renderUndoList(); $('undoWrap').hidden = false; }
+  }
+  // One row per delete, newest at the top: the title (or "All 5 documents") and Bring back.
+  function renderUndoList() {
+    const ul = $('undoList');
+    ul.textContent = '';
+    for (const entry of undoList.slice().reverse()) {
+      const li = document.createElement('li');
+      const row = document.createElement('div');
+      row.className = 'restore-row undo-row';
+      const body = document.createElement('div');
+      body.className = 'r-body';
+      const title = document.createElement('div');
+      title.className = 'r-title';
+      title.textContent = entry.removed.length === 1 ? entry.removed[0].title : 'All ' + entry.removed.length + ' documents';
+      body.appendChild(title);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-secondary';
+      btn.textContent = 'Bring back';
+      btn.setAttribute('aria-label', 'Bring back ' + title.textContent);
+      btn.addEventListener('click', () => undoEntry(entry));
+      row.append(body, btn);
+      li.appendChild(row);
+      ul.appendChild(li);
+    }
   }
 
   // ---------- Storage meter ----------
@@ -1011,8 +1066,9 @@
     if (used === null) { $('storageMeter').textContent = 'Storage use can’t be read on this phone.'; return; }
     const label = fmtBytes(used);
     const pct = Math.min(100, Math.round(used / STORAGE_LIMIT * 100));
-    $('storageMeter').textContent = 'Saved documents use ' + label + ' of about 5 MB (' + pct + '%).'
-      + (pct >= 80 ? ' Nearly full: save a backup, then delete old documents.' : '');
+    // Short, so it fits one line on a small phone (v6.1). The bar under it shows the percent.
+    $('storageMeter').textContent = label + ' used of about 5 MB.'
+      + (pct >= 80 ? ' Nearly full: back up, then delete old documents.' : '');
     $('storageFill').style.width = pct + '%';
     $('storageFill').parentElement.classList.toggle('nearly-full', pct >= 80);
   }
@@ -1040,6 +1096,7 @@
     $('lastBackup').textContent = !docs.length ? ''
       : !t ? 'No backup yet.'
       : 'Last backup ' + fmtDate(t) + (newer ? ' (' + newer + ' new since).' : '.');
+    $('backupHint').hidden = !docs.length; // no empty line under the button when there's nothing saved
   }
   async function saveBackup() {
     if (!docs.length) { toast('Nothing to back up yet.'); return; }
@@ -1304,7 +1361,7 @@
     const name = file.name || '';
     const ext = ((name.match(/\.([A-Za-z0-9]+)$/) || [])[1] || '').toLowerCase();
     const type = file.type || '';
-    const undoAtStart = undoList.length; // see addDoc's keepUndo
+    const deletesAtStart = deleteCount; // see addDoc's keepUndo (a count, not the list length: Bring back shortens the list)
     if (file.size > MAX_FILE) { toast('That file is too big to open (over 60 MB).', 6000); return; }
     let text;
     try {
@@ -1336,7 +1393,7 @@
       toast(ext === 'pdf' ? 'This PDF has no text in it, only pictures of pages.' : 'There’s no text in that file.', 6000);
       return;
     }
-    addDoc(text, fileTitle(name), undoList.length > undoAtStart);
+    addDoc(text, fileTitle(name), deleteCount > deletesAtStart);
   }
 
   // Pulls one file out of a zip (a .docx is a zip). Returns its text, or null if it isn't there.
@@ -2663,7 +2720,7 @@
       e.preventDefault(); // nothing left to scroll that way: don't let the page behind move
     }, { passive: false });
   }
-  for (const id of ['sheetWrap', 'noteWrap', 'listWrap', 'restoreWrap']) trapScroll($(id));
+  for (const id of ['sheetWrap', 'noteWrap', 'listWrap', 'restoreWrap', 'undoWrap']) trapScroll($(id));
 
 
   // ---------- Wiring up the buttons ----------
@@ -2680,7 +2737,9 @@
     if (!confirm('Delete all ' + docs.length + ' saved documents? You can undo this until you add a new document or close the app.')) return;
     deleteDocs(docs.slice(), 'Deleted all ' + docs.length + (docs.length === 1 ? ' document' : ' documents'));
   });
-  $('undoBtn').addEventListener('click', undoDelete);
+  $('undoBtn').addEventListener('click', undoTap);
+  $('undoDone').addEventListener('click', () => { $('undoWrap').hidden = true; });
+  $('undoBackdrop').addEventListener('click', () => { $('undoWrap').hidden = true; });
   $('backupBtn').addEventListener('click', saveBackup);
   $('restoreBtn').addEventListener('click', () => $('restoreFile').click());
   $('restoreFile').addEventListener('change', async (e) => {
