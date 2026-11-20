@@ -1440,19 +1440,31 @@
     openDoc(doc.id);
   }
 
+  let pasteFailedAt = 0; // when the last paste was refused (0 = the last one worked)
   async function pasteFromClipboard() {
     try {
       // iPhone shows a small "Paste" bubble here; one tap lets us read what you copied.
       const text = await navigator.clipboard.readText();
+      pasteFailedAt = 0;
       if (!text || !text.trim()) { toast('Your clipboard is empty. Copy some text first.'); return; }
       addDoc(text);
     } catch (e) {
       // v6.5 (Gary, 2026-11-20): after a manual copy in Outlook, iPhone sometimes shows its big
       // "Allow Paste" box, and the read fails even after Allow. Tapping the button again works,
-      // so say that and stay on this screen (before, this opened the typing box). The code at the
-      // end is iPhone's own reason, so a screenshot of a failure tells us what actually happened.
+      // so the first refusal says that and stays on this screen. A second refusal in a row (within
+      // 2 minutes) means tapping again isn't helping, so it opens the typing box instead: the
+      // message never asks for a third try. The code at the end is iPhone's own reason, so a
+      // screenshot of a failure tells us what actually happened.
       const code = (e && e.name) || 'unknown';
-      toast('iPhone stopped that paste. Tap Read copied text again, or use Type or paste. (Code: ' + code + ')', 8000);
+      const again = pasteFailedAt && Date.now() - pasteFailedAt < 120000;
+      if (again) {
+        pasteFailedAt = 0;
+        openManual();
+        toast('iPhone stopped it again. Press and hold in the box, then tap Paste. (Code: ' + code + ')', 8000);
+      } else {
+        pasteFailedAt = Date.now();
+        toast('iPhone stopped that paste. Tap Read copied text again, or use Type or paste. (Code: ' + code + ')', 8000);
+      }
     }
   }
   // ---------- Add from a file (PDF, Word .docx, or plain text) ----------
