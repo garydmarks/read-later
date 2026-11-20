@@ -6,7 +6,8 @@
 // and fall back to the saved copy when you're offline or the internet takes over 3 seconds.
 
 const CACHE = 'readlater-v1';
-const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
+// The PDF reader (pdfjs.*) is saved too, so Add from a file opens PDFs with no internet.
+const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png', 'pdfjs.min.js', 'pdfjs.worker.min.js'];
 
 // First install: save a copy of the app files.
 self.addEventListener('install', (event) => {

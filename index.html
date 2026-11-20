@@ -182,6 +182,24 @@
   .backup-item { display: grid; gap: 6px; margin-bottom: 16px; }
   .backup-item .btn-secondary { width: 100%; min-height: 48px; }
 
+  /* Paste by hand / Add from a file, side by side under Paste and read */
+  .add-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 16px; }
+  .add-hint { margin-top: -6px; }
+
+  /* Restore pick list: one row per document in the backup, each with a tick box */
+  /* minmax(0, 1fr): a long title is cut with "…" instead of pushing the row off the screen */
+  .restore-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; grid-template-columns: minmax(0, 1fr); }
+  .restore-row {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 10px 4px; border-bottom: 1px solid var(--line); min-height: 44px;
+  }
+  .restore-row input { flex: none; width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--accent); }
+  .restore-row .r-body { min-width: 0; flex: 1; }
+  .restore-row .r-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .restore-row .r-meta { color: var(--muted); font-size: 14px; }
+  #restoreFit.too-big { color: var(--danger); font-weight: 600; }
+  #restoreGo:disabled { opacity: .45; }
+
   /* Undo after a delete: a dark bar along the bottom of the library (same colors as the toast) */
   .undo-bar {
     position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 16px); z-index: 20;
@@ -457,7 +475,13 @@
   <button id="pasteBtn" class="btn-primary" type="button">
     Paste and read
   </button>
-  <button id="manualToggle" class="link-btn" type="button">Paste by hand instead</button>
+  <!-- Two other ways to add a document: type or paste into a box, or open a saved file -->
+  <div class="add-row">
+    <button id="manualToggle" class="link-btn" type="button">Paste by hand instead</button>
+    <button id="addFileBtn" class="link-btn" type="button">Add from a file</button>
+  </div>
+  <p class="hint add-hint">Add from a file opens PDF, Word or text files.</p>
+  <input id="addFile" type="file" accept=".pdf,.docx,.txt,.md,.text,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
 
   <div id="manualBox" class="manual" hidden>
     <textarea id="manualText" placeholder="Press and hold here, then tap Paste."></textarea>
@@ -473,19 +497,19 @@
   <button id="deleteAll" class="link-btn danger-link" type="button" hidden>Delete all documents</button>
 
   <!-- Backup: one file with every document, highlight and note (save it to Files or OneDrive) -->
-  <h2 class="section-label">Backup</h2>
+  <h2 class="section-label">Backup (all documents)</h2>
   <p id="storageMeter" class="hint"></p>
   <div class="bar storage-bar" aria-hidden="true"><i id="storageFill"></i></div>
-  <!-- Each button says what it does right under it, so nobody has to press it to find out
-       (Gary, 2026-11-19). No pop-up before them: the Share screen and the file picker must open
-       straight from the tap, or the iPhone may refuse to open them. -->
+  <!-- Each button gets one short line under it, only what the label can't say (Gary, 2026-11-20:
+       clean, no needless explanation). No pop-up before them: the Share screen and the file picker
+       must open straight from the tap, or the iPhone may refuse to open them. -->
   <div class="backup-item">
-    <button id="backupBtn" class="btn-secondary" type="button">Save a backup file</button>
-    <p class="hint">Makes one file holding every document, highlight and note. The Share screen opens: choose Save to Files (or OneDrive) to keep it safe.</p>
+    <button id="backupBtn" class="btn-secondary" type="button">Back up all documents</button>
+    <p class="hint">One file with every highlight and note. Save it to Files or OneDrive. <span id="lastBackup"></span></p>
   </div>
   <div class="backup-item">
-    <button id="restoreBtn" class="btn-secondary" type="button">Restore from a backup file</button>
-    <p class="hint">Pick a backup file you saved earlier. Documents in it that aren’t on this phone are added back. Nothing already here is changed or deleted.</p>
+    <button id="restoreBtn" class="btn-secondary" type="button">Restore from a backup</button>
+    <p class="hint">Choose which documents come back. Nothing here is changed.</p>
   </div>
   <input id="restoreFile" type="file" accept=".json,application/json" hidden>
 
@@ -628,6 +652,7 @@
     <!-- Export opens the iPhone Share screen: Mail, Outlook, Files, OneDrive, Notes, AirDrop and so on -->
     <button id="shareMarked" class="btn-secondary go" type="button">Export with highlights and notes</button>
     <button id="sharePlain" class="btn-secondary" type="button">Export plain text</button>
+    <p class="hint export-hint">Export sends a copy to Mail, Files or OneDrive.</p>
     <!-- Copies the document's words only (no highlights or notes), ready to paste anywhere -->
     <button id="copyText" class="btn-secondary" type="button">Copy plain text</button>
     <button id="renameBtn" class="btn-secondary" type="button">Rename this document</button>
@@ -669,6 +694,24 @@
   </div>
 </div>
 
+<!-- ===================== Restore: pick which documents come back ===================== -->
+<div id="restoreWrap" class="sheet-wrap" hidden>
+  <button id="restoreBackdrop" class="backdrop" type="button" aria-label="Cancel restore"></button>
+  <div class="sheet" role="dialog" aria-labelledby="restoreTitle">
+    <div class="sheet-head">
+      <h2 id="restoreTitle">Restore</h2>
+      <button id="restoreAll" class="link-btn" type="button">Select none</button>
+    </div>
+    <p id="restoreNote" class="hint" hidden></p>
+    <ul id="restoreList" class="restore-list"></ul>
+    <p id="restoreFit" class="hint" role="status"></p>
+    <div class="row">
+      <button id="restoreCancel" class="btn-secondary" type="button">Cancel</button>
+      <button id="restoreGo" class="btn-secondary go" type="button">Restore</button>
+    </div>
+  </div>
+</div>
+
 
 <div id="toast" class="toast" role="status" hidden></div>
 
@@ -678,7 +721,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '5.9';
+  const APP_VERSION = '6.0';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -911,6 +954,7 @@
     $('emptyMsg').hidden = docs.length > 0;
     $('deleteAll').hidden = docs.length === 0;
     showStorage();
+    showLastBackup();
   }
 
   // ---------- Undo after a delete ----------
@@ -965,7 +1009,7 @@
   function showStorage() {
     const used = storageUsed();
     if (used === null) { $('storageMeter').textContent = 'Storage use can’t be read on this phone.'; return; }
-    const label = used < 1000 * 1024 ? Math.max(1, Math.round(used / 1024)) + ' KB' : (used / 1024 / 1024).toFixed(1) + ' MB';
+    const label = fmtBytes(used);
     const pct = Math.min(100, Math.round(used / STORAGE_LIMIT * 100));
     $('storageMeter').textContent = 'Saved documents use ' + label + ' of about 5 MB (' + pct + '%).'
       + (pct >= 80 ? ' Nearly full: save a backup, then delete old documents.' : '');
@@ -978,13 +1022,33 @@
   function backupJSON() {
     return JSON.stringify({ app: 'read-later', format: BACKUP_FORMAT, version: APP_VERSION, exported: Date.now(), docs });
   }
+  // When the last backup was made, shown under the button as "Last backup Nov 20 (2 new since)".
+  // Kept under its own key, written quietly: a failed write here must never show a "storage is full"
+  // notice right after a backup that worked. The app can't see whether you then picked Save to Files
+  // or closed the next screen, so this is when the backup was MADE, not proof it was stored.
+  const LAST_BACKUP_KEY = 'readlater.v1.lastBackup';
+  function lastBackupTime() {
+    try { return +localStorage.getItem(LAST_BACKUP_KEY) || 0; } catch (e) { return 0; }
+  }
+  function markBackup() {
+    try { localStorage.setItem(LAST_BACKUP_KEY, String(Date.now())); } catch (e) { /* not saved: the line just stays as it was */ }
+    showLastBackup();
+  }
+  function showLastBackup() {
+    const t = lastBackupTime();
+    const newer = docs.filter(d => d.created > t).length;
+    $('lastBackup').textContent = !docs.length ? ''
+      : !t ? 'No backup yet.'
+      : 'Last backup ' + fmtDate(t) + (newer ? ' (' + newer + ' new since).' : '.');
+  }
   async function saveBackup() {
     if (!docs.length) { toast('Nothing to back up yet.'); return; }
     const day = new Date().toISOString().slice(0, 10);
     const file = new File([backupJSON()], 'Read Later backup ' + day + '.json', { type: 'application/json' });
     try {
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Read Later backup' }); return; }
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Read Later backup' }); markBackup(); return; }
       saveFile(file);
+      markBackup();
       // This phone wouldn't share the file, so it was handed to the browser to download. That can
       // fail without a sign, so say what to look for (fix check, 2026-11-19).
       toast('Look for “' + file.name + '” in Files > Downloads. If it isn’t there, the backup wasn’t saved.', 8000);
@@ -1043,9 +1107,36 @@
     }
     return out;
   }
-  // Adds every valid document from a backup that isn't already here (same id or same text).
-  // Returns {added, skipped, bad} or {error}. Nothing already saved is ever changed or removed.
-  function importBackup(text) {
+  // Restoring has two steps, so you can choose which documents come back (Gary, 2026-11-20):
+  //   readBackup  checks the file and returns the documents that aren't on this phone yet;
+  //   saveRestored adds the ones you ticked.
+  // importBackup(text) does both with everything ticked (the old one-step restore, used by the tests);
+  // importBackup(text, ids) restores only the documents whose ids are listed.
+  function importBackup(text, ids) {
+    const r = readBackup(text);
+    if (r.error) return r;
+    const chosen = ids ? r.incoming.filter(d => ids.includes(d.id)) : r.incoming;
+    const saved = saveRestored(chosen);
+    if (saved.error) return { error: saved.error, added: 0, skipped: r.skipped, bad: r.bad, inUndo: r.inUndo };
+    return { added: saved.added, skipped: r.skipped, bad: r.bad, inUndo: r.inUndo };
+  }
+  // Adds the chosen documents. Returns {added} or {error}. Nothing already saved is ever changed or removed.
+  function saveRestored(chosen) {
+    if (undoList.length) return { error: 'undo-pending', added: 0 }; // see readBackup
+    // Checked again here: something may have been added since the file was read.
+    const fresh = chosen.filter(d => !docs.some(x => x.id === d.id || x.text === d.text));
+    if (fresh.length) {
+      const before = docs;
+      docs = docs.concat(fresh);
+      if (!saveDocs()) { docs = before; return { error: 'not-saved', added: 0 }; }
+      askToKeepData();
+    }
+    renderLibrary();
+    return { added: fresh.length };
+  }
+  // Reads a backup file. Returns {incoming, skipped, bad, inUndo} (incoming = valid documents not on
+  // this phone, in the file's order) or {error}. Saves nothing.
+  function readBackup(text) {
     let data;
     try { data = JSON.parse(text); } catch (e) { return { error: 'not-backup', added: 0 }; }
     if (!data || data.app !== 'read-later' || !Array.isArray(data.docs)) return { error: 'not-backup', added: 0 };
@@ -1069,40 +1160,112 @@
       if (docs.some(dup) || incoming.some(dup)) { skipped++; continue; }
       incoming.push(d);
     }
-    if (incoming.length) {
-      const before = docs;
-      docs = docs.concat(incoming);
-      if (!saveDocs()) { docs = before; return { error: 'not-saved', added: 0, skipped, bad, inUndo }; }
-      askToKeepData();
-    }
-    renderLibrary();
-    return { added: incoming.length, skipped, bad, inUndo };
-  }
-  async function restoreFromFile(file) {
-    let res;
-    try { res = importBackup(await file.text()); } catch (e) { res = { error: 'unreadable', added: 0 }; }
-    if (res.error === 'not-saved') return; // saveDocs has already said why
-    if (res.error === 'undo-pending') { toast('First tap Undo at the bottom to bring back what you just deleted, then restore. (Or add a document, which ends Undo.)', 8000); return; }
-    if (res.error === 'newer') { toast('That backup was made by a newer Read Later. Open the app with internet to update it first.', 6000); return; }
-    if (res.error) { toast('That file isn’t a Read Later backup.'); return; }
-    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
-    let msg = res.added ? 'Restored ' + plural(res.added, 'document') + '.' : 'Nothing new to restore.';
-    if (res.skipped) msg += ' ' + plural(res.skipped, 'document') + ' already here.';
-    if (res.bad) msg += ' ' + plural(res.bad, 'damaged document') + ' left out.';
-    if (res.inUndo) msg += ' ' + plural(res.inUndo, 'document') + ' you just deleted: tap Undo to bring back the newest copy.';
-    toast(msg, 8000);
+    return { incoming, skipped, bad, inUndo };
   }
 
-  function addDoc(text) {
+  const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  // "120 KB" or "1.4 MB" (the storage meter's own wording).
+  const fmtBytes = (b) => b < 1000 * 1024 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1024 / 1024).toFixed(1) + ' MB';
+  // About how much room a document takes once saved (2 bytes a character, plus the comma between records).
+  const docBytes = (d) => (JSON.stringify(d).length + 1) * 2;
+  // What a restore found besides the new documents, for the pop-up and the closing message.
+  function restoreExtras(r) {
+    return [r.skipped ? plural(r.skipped, 'document') + ' already here.' : '',
+      r.bad ? plural(r.bad, 'damaged document') + ' left out.' : ''].filter(Boolean).join(' ');
+  }
+
+  async function restoreFromFile(file) {
+    let res;
+    try { res = readBackup(await file.text()); } catch (e) { res = { error: 'unreadable', added: 0 }; }
+    if (res.error === 'undo-pending') { toast('First tap Undo at the bottom to bring back what you just deleted, then restore. (Or add a document, which ends Undo.)', 8000); return; }
+    if (res.error === 'newer') { toast('That backup was made by a newer Read Later. Open the app with internet to update it first.', 6000); return; }
+    if (res.error) { toast('That file isn’t a Read Later backup. To add a PDF, Word or text file, use Add from a file.', 6000); return; }
+    if (!res.incoming.length) { toast(('Nothing new to restore. ' + restoreExtras(res)).trim(), 6000); return; }
+    openRestorePick(res);
+  }
+
+  // ---------- Restore pick list ----------
+  // One row per document in the backup that isn't on this phone, all ticked to start. The line under
+  // the list says whether the ticked ones fit in the free space; Restore stays off while they don't
+  // (restoring everything after "back up, then delete old documents" could overfill the phone).
+  let restoring = null; // the readBackup result the pop-up is showing
+  function openRestorePick(r) {
+    restoring = r;
+    const ul = $('restoreList');
+    ul.textContent = '';
+    for (const d of r.incoming) {
+      const li = document.createElement('li');
+      const row = document.createElement('label'); // the whole row is the tap target for its box
+      row.className = 'restore-row';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = true;
+      box.value = d.id;
+      box.addEventListener('change', updateRestoreFit);
+      const body = document.createElement('div');
+      body.className = 'r-body';
+      const title = document.createElement('div');
+      title.className = 'r-title';
+      title.textContent = d.title;
+      const meta = document.createElement('div');
+      meta.className = 'r-meta';
+      const n = (d.marks || []).length;
+      meta.textContent = 'Saved ' + fmtDate(d.created) + (n ? ' · ' + plural(n, 'highlight') : '') + ' · ' + fmtBytes(docBytes(d));
+      body.append(title, meta);
+      row.append(box, body);
+      li.appendChild(row);
+      ul.appendChild(li);
+    }
+    const extras = restoreExtras(r);
+    $('restoreNote').textContent = extras;
+    $('restoreNote').hidden = !extras;
+    updateRestoreFit();
+    $('restoreWrap').hidden = false;
+  }
+  const restoreBoxes = () => [...$('restoreList').querySelectorAll('input[type=checkbox]')];
+  function updateRestoreFit() {
+    const ids = restoreBoxes().filter(b => b.checked).map(b => b.value);
+    const chosen = restoring ? restoring.incoming.filter(d => ids.includes(d.id)) : [];
+    const need = chosen.reduce((sum, d) => sum + docBytes(d), 0);
+    const used = storageUsed();
+    const free = used === null ? null : Math.max(0, STORAGE_LIMIT - used);
+    const tooBig = free !== null && need > free;
+    const fit = $('restoreFit');
+    fit.classList.toggle('too-big', tooBig);
+    fit.textContent = !chosen.length ? 'Nothing ticked.'
+      : tooBig ? 'Too big: needs ' + fmtBytes(need) + ', about ' + fmtBytes(free) + ' free. Untick some.'
+      : free === null ? 'Needs ' + fmtBytes(need) + '.'
+      : 'Needs ' + fmtBytes(need) + ' of about ' + fmtBytes(free) + ' free.';
+    $('restoreGo').disabled = !chosen.length || tooBig;
+    $('restoreGo').textContent = chosen.length ? 'Restore ' + chosen.length : 'Restore';
+    $('restoreAll').textContent = ids.length === restoreBoxes().length ? 'Select none' : 'Select all';
+  }
+  function closeRestorePick() { $('restoreWrap').hidden = true; restoring = null; }
+  function restoreChosen() {
+    if (!restoring) return;
+    const r = restoring;
+    const ids = restoreBoxes().filter(b => b.checked).map(b => b.value);
+    const res = saveRestored(r.incoming.filter(d => ids.includes(d.id)));
+    if (res.error === 'not-saved') return; // saveDocs has already said why; the pop-up stays so you can untick some
+    closeRestorePick();
+    if (res.error === 'undo-pending') { toast('First tap Undo at the bottom, then restore.', 6000); return; }
+    toast(((res.added ? 'Restored ' + plural(res.added, 'document') + '.' : 'Nothing new to restore.') + ' ' + restoreExtras(r)).trim(), 6000);
+  }
+
+  // title: optional (a file's name); without it the first line of the text becomes the title.
+  function addDoc(text, title, keepUndo) {
     const clean = text.trim();
     if (!clean) { toast('There’s no text to save. Copy something first.'); return; }
+    // Bigger than the whole of the app's storage: deleting old documents couldn't make room, so
+    // don't say to (review fix, 2026-11-20).
+    if (clean.length * 2 > STORAGE_LIMIT) { toast('This is too long to save on the phone (the app holds about 5 MB of text).', 6000); return; }
     // Same text pasted twice? Reopen it instead of making a copy.
     const existing = docs.find(d => d.text === clean);
     if (existing) { openDoc(existing.id); return; }
     const now = Date.now();
     const doc = {
       id: now.toString(36) + Math.random().toString(36).slice(2, 6),
-      title: makeTitle(clean),
+      title: title || makeTitle(clean),
       text: clean,
       total: toSentences(clean).length,
       pos: 0,
@@ -1111,7 +1274,9 @@
     };
     docs.push(doc);
     if (!saveDocs()) { docs.pop(); return; }
-    clearUndo(); // a new document ends the chance to undo earlier deletes (Gary, 2026-11-19)
+    // A new document ends the chance to undo earlier deletes (Gary, 2026-11-19). keepUndo: a file
+    // that finished reading after you deleted something meanwhile leaves that delete undoable.
+    if (!keepUndo) clearUndo();
     askToKeepData(); // a tap just happened, which some phones want before saying yes
     openDoc(doc.id);
   }
@@ -1127,6 +1292,191 @@
       toast('Couldn’t read the clipboard. Paste into the box instead.');
     }
   }
+  // ---------- Add from a file (PDF, Word .docx, or plain text) ----------
+  // Each kind of file is turned into plain text here on the phone, then saved exactly like a paste.
+  // Nothing in the file is run, and nothing is sent anywhere.
+  const userErr = (msg) => Object.assign(new Error(msg), { userMessage: msg });
+  // "Q3_report-final.pdf" becomes "Q3 report-final".
+  const fileTitle = (name) => name.replace(/\.[A-Za-z0-9]{1,5}$/, '').replace(/_+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const MAX_FILE = 60 * 1024 * 1024; // bigger than any email or report; the text must still fit in about 5 MB
+
+  async function addFromFile(file) {
+    const name = file.name || '';
+    const ext = ((name.match(/\.([A-Za-z0-9]+)$/) || [])[1] || '').toLowerCase();
+    const type = file.type || '';
+    const undoAtStart = undoList.length; // see addDoc's keepUndo
+    if (file.size > MAX_FILE) { toast('That file is too big to open (over 60 MB).', 6000); return; }
+    let text;
+    try {
+      if (ext === 'pdf' || type === 'application/pdf') {
+        toast('Reading the PDF…', 120000); // cleared when it's done
+        text = await pdfText(file);
+      } else if (ext === 'docx') {
+        text = await docxText(file);
+      } else if (ext === 'doc') {
+        toast('Old Word files (.doc) can’t be opened. In Word, save it as .docx or PDF.', 6000); return;
+      } else if (ext === 'json') {
+        // A Read Later backup picked here by mistake: point to the right button.
+        const head = (await file.slice(0, 300).text());
+        toast(/"app"\s*:\s*"read-later"/.test(head) ? 'That’s a backup file. Use Restore from a backup.'
+          : 'That kind of file can’t be added. Use a PDF, Word (.docx) or text file.', 6000);
+        return;
+      } else if (['txt', 'md', 'text'].includes(ext) || type.startsWith('text/')) {
+        text = await file.text();
+      } else {
+        toast('That kind of file can’t be added. Use a PDF, Word (.docx) or text file.', 6000); return;
+      }
+    } catch (e) {
+      if (!(e && e.userMessage)) console.warn('Add from a file:', e); // the real reason, for checking on a computer
+      toast((e && e.userMessage) || 'Couldn’t read that file.', 6000);
+      return;
+    }
+    $('toast').hidden = true; // clears "Reading the PDF…"
+    if (!text || !text.trim()) {
+      toast(ext === 'pdf' ? 'This PDF has no text in it, only pictures of pages.' : 'There’s no text in that file.', 6000);
+      return;
+    }
+    addDoc(text, fileTitle(name), undoList.length > undoAtStart);
+  }
+
+  // Pulls one file out of a zip (a .docx is a zip). Returns its text, or null if it isn't there.
+  // Uses the phone's own unzip (DecompressionStream), so no extra code is needed.
+  async function unzipText(buf, want) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const u16 = (p) => dv.getUint16(p, true), u32 = (p) => dv.getUint32(p, true);
+    // The zip's table of contents is found from its end record, within the last 64 KB.
+    let end = -1;
+    for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (u32(i) === 0x06054b50) { end = i; break; }
+    if (end < 0) return null;
+    const count = u16(end + 10);
+    let p = u32(end + 16);
+    const dec = new TextDecoder();
+    for (let n = 0; n < count; n++) {
+      if (p + 46 > buf.length || u32(p) !== 0x02014b50) return null;
+      const method = u16(p + 10), size = u32(p + 20), nameLen = u16(p + 28), extraLen = u16(p + 30), noteLen = u16(p + 32), at = u32(p + 42);
+      if (dec.decode(buf.subarray(p + 46, p + 46 + nameLen)) === want) {
+        if (at + 30 > buf.length || u32(at) !== 0x04034b50) return null;
+        const start = at + 30 + u16(at + 26) + u16(at + 28);
+        const data = buf.subarray(start, start + size);
+        if (method === 0) return dec.decode(data); // stored as is
+        if (method !== 8) return null;            // a packing method Word never uses
+        let stream;
+        try { stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')); }
+        catch (e) { throw userErr('This iPhone can’t open Word files. Save it as a PDF and add that instead.'); }
+        return await new Response(stream).text();
+      }
+      p += 46 + nameLen + extraLen + noteLen;
+    }
+    return null;
+  }
+
+  // A Word file's text, one paragraph per Word paragraph (table cells too). Pictures, formatting,
+  // deleted tracked changes and field codes are left out. Text boxes Word stores twice are read once.
+  async function docxText(file) {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    // The main text is usually word/document.xml, but some makers (Word Online) use another name.
+    // The file's own table of parts (_rels/.rels) says which (review fix, 2026-11-20).
+    let main = 'word/document.xml';
+    const rels = await unzipText(buf, '_rels/.rels');
+    if (rels) {
+      const r = [...new DOMParser().parseFromString(rels, 'application/xml').getElementsByTagName('Relationship')]
+        .find(x => /\/officeDocument$/.test(x.getAttribute('Type') || ''));
+      if (r && r.getAttribute('Target')) main = r.getAttribute('Target').replace(/^\//, '');
+    }
+    const xml = await unzipText(buf, main);
+    if (xml === null) throw userErr('That Word file couldn’t be opened.');
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw userErr('That Word file couldn’t be opened.');
+    const paras = [];
+    let line = '';
+    const flush = () => { if (line.trim()) paras.push(line.trim()); line = ''; };
+    const walk = (node) => {
+      for (const c of node.children) {
+        const n = c.localName;
+        // pPr / rPr are settings (tab stops, fonts), not text: skipped so a tab-stop setting isn't read as a tab.
+        if (n === 'Fallback' || n === 'delText' || n === 'instrText' || n === 'pPr' || n === 'rPr') continue;
+        if (n === 't') line += c.textContent;
+        else if (n === 'noBreakHyphen') line += '-'; // "e-mail", "COVID-19" (a soft hyphen adds nothing)
+        else if (n === 'tab') line += ' ';
+        else if (n === 'br' || n === 'cr') line += '\n';
+        else if (n === 'p') { flush(); walk(c); flush(); }
+        else walk(c);
+      }
+    };
+    walk(doc.documentElement);
+    flush();
+    return paras.join('\n\n');
+  }
+
+  // A PDF's text, using Mozilla's PDF reader (pdf.js, stored with the app: pdfjs.min.js and its
+  // worker). It loads only when you pick a PDF. Lines on a page are joined back into paragraphs:
+  // a bigger-than-usual gap between lines starts a new paragraph. Pages are joined by a single line
+  // break, so a sentence that runs over a page break joins up again (see toParagraphs).
+  async function pdfText(file) {
+    let lib;
+    try { lib = await import('./pdfjs.min.js'); }
+    catch (e) { throw userErr('The PDF reader couldn’t load. Open the app once with internet, then try again.'); }
+    lib.GlobalWorkerOptions.workerSrc = new URL('pdfjs.worker.min.js', document.baseURI).href;
+    let pdf;
+    // isEvalSupported false: the reader never builds code from the file. Fonts aren't loaded (only text is read).
+    // The loading task (not the document) is what gets closed at the end, freeing the reader's memory.
+    const task = lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false, disableFontFace: true, enableXfa: false });
+    try {
+      pdf = await task.promise;
+    } catch (e) {
+      task.destroy();
+      if (e && e.name === 'PasswordException') throw userErr('That PDF has a password. Remove it, then try again.');
+      throw userErr('That PDF couldn’t be read.');
+    }
+    try {
+      const pages = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        // A long PDF takes a while: say which page, so it never looks stuck (review fix, 2026-11-20).
+        if (pdf.numPages > 3) toast('Reading page ' + i + ' of ' + pdf.numPages + '…', 120000);
+        const page = await pdf.getPage(i);
+        const items = (await page.getTextContent()).items;
+        page.cleanup();
+        // First the visual lines: {text, y, h}. y = height on the page (bigger = higher up).
+        const lines = [];
+        let cur = null;
+        for (const it of items) {
+          if (typeof it.str !== 'string') continue; // a layout marker, not text
+          const y = it.transform[5], h = Math.abs(it.height || it.transform[3]) || (cur && cur.h) || 10;
+          if (cur && cur.text && Math.abs(y - cur.y) > h * 0.6) cur = null; // moved to another line without saying so
+          if (!cur) { cur = { text: '', y, h }; lines.push(cur); }
+          cur.text += it.str;
+          if (it.hasEOL) cur = null;
+        }
+        // Then paragraphs: lines close together are one paragraph; a wide gap, or a jump back up
+        // (a new column), starts the next one. "Wide" is measured against this page's own usual
+        // line gap (the middle value of all its gaps), so 1.5-line and double-spaced documents
+        // aren't split at every line (review fix, 2026-11-20: a fixed 1.7 x font height did that).
+        const kept = lines.filter(l => l.text.trim());
+        const gaps = [];
+        for (let k = 1; k < kept.length; k++) { const g = kept[k - 1].y - kept[k].y; if (g > 0) gaps.push(g); }
+        gaps.sort((a, b) => a - b);
+        const usual = gaps.length >= 3 ? gaps[Math.floor(gaps.length / 2)] : null;
+        let text = '', prev = null;
+        for (const l of kept) {
+          const t = l.text.replace(/\s+/g, ' ').trim();
+          const gap = prev ? prev.y - l.y : 0;
+          const wide = usual ? gap > usual * 1.4 : gap > Math.max(l.h, prev ? prev.h : 0) * 1.7;
+          if (!prev) text = t;
+          else if (l.y > prev.y + 1 || wide) text += '\n\n' + t;
+          // A word split with a hyphen at the line end is joined with the hyphen kept: dropping it
+          // would also break real compounds like "well-known".
+          else if (/[A-Za-z]-$/.test(text) && /^[a-z]/.test(t)) text += t;
+          else text += ' ' + t;
+          prev = l;
+        }
+        if (text) pages.push(text);
+      }
+      return pages.join('\n');
+    } finally {
+      task.destroy();
+    }
+  }
+
   function openManual() { $('manualBox').hidden = false; $('manualText').focus(); }
   function closeManual() { $('manualBox').hidden = true; $('manualText').value = ''; }
 
@@ -2313,7 +2663,7 @@
       e.preventDefault(); // nothing left to scroll that way: don't let the page behind move
     }, { passive: false });
   }
-  for (const id of ['sheetWrap', 'noteWrap', 'listWrap']) trapScroll($(id));
+  for (const id of ['sheetWrap', 'noteWrap', 'listWrap', 'restoreWrap']) trapScroll($(id));
 
 
   // ---------- Wiring up the buttons ----------
@@ -2337,6 +2687,21 @@
     const file = e.target.files && e.target.files[0];
     e.target.value = ''; // so picking the same file again still counts as a change
     if (file) await restoreFromFile(file);
+  });
+  $('restoreAll').addEventListener('click', () => {
+    const boxes = restoreBoxes();
+    const tickAll = boxes.some(b => !b.checked);
+    for (const b of boxes) b.checked = tickAll;
+    updateRestoreFit();
+  });
+  $('restoreGo').addEventListener('click', restoreChosen);
+  $('restoreCancel').addEventListener('click', closeRestorePick);
+  $('restoreBackdrop').addEventListener('click', closeRestorePick);
+  $('addFileBtn').addEventListener('click', () => $('addFile').click());
+  $('addFile').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // so picking the same file again still counts as a change
+    if (file) await addFromFile(file);
   });
 
   $('readerBack').addEventListener('click', () => { stop(); closeFind(); cur = null; renderLibrary(); show('libraryView'); });
@@ -2522,7 +2887,7 @@
   window.RL = {
     state: () => ({ view: currentView(), playing, pos: cur && cur.pos, total: sents.length, docs: docs.length, follow, collapsed: isCollapsed() }),
     addDoc, openDoc, jumpTo, toSentences, speakable, shortlist, voiceLabel,
-    backupJSON, importBackup, storageUsed,
+    backupJSON, importBackup, readBackup, storageUsed,
     marks: () => cur && cur.marks, addMark, readSelection, sliceText, marksAsText, openNote,
     exportHTML, exportMarkedText,
     find: (q) => { openFind(); $('findInput').value = q; runFind(q); return { n: finds.length, at: findAt }; },
