@@ -746,7 +746,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '6.5';
+  const APP_VERSION = '6.6';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1444,7 +1444,16 @@
   async function pasteFromClipboard() {
     try {
       // iPhone shows a small "Paste" bubble here; one tap lets us read what you copied.
-      const text = await navigator.clipboard.readText();
+      let text;
+      try {
+        text = await navigator.clipboard.readText();
+      } catch (first) {
+        // v6.6 (Gary, 2026-11-20): when iPhone shows its big "Allow Paste" box, the read fails
+        // (NotAllowedError) even after Allow, yet the next try usually gets the small Paste
+        // bubble and works. So try once more by itself. If Safari refuses a second read without a
+        // new tap, this fails the same way and the messages below take over. Only one retry.
+        text = await navigator.clipboard.readText();
+      }
       pasteFailedAt = 0;
       if (!text || !text.trim()) { toast('Your clipboard is empty. Copy some text first.'); return; }
       addDoc(text);
