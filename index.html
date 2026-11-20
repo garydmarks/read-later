@@ -109,8 +109,9 @@
   }
 
   /* ---------- Library screen ---------- */
-  .app-title { font-size: 28px; font-weight: 700; margin: 8px 0 4px; letter-spacing: -0.01em; }
-  .app-sub { color: var(--muted); margin: 0 0 20px; font-size: 15px; }
+  /* No line under the title any more (v6.3, Gary 2026-11-20: "Copy text anywhere... stay on this
+     phone" wasn't useful), so the title carries the space above Paste and read itself. */
+  .app-title { font-size: 28px; font-weight: 700; margin: 8px 0 20px; letter-spacing: -0.01em; }
 
   .btn-primary {
     display: flex; align-items: center; justify-content: center; gap: 12px;
@@ -219,6 +220,12 @@
     flex: none; min-width: 72px; min-height: 44px; padding: 0 16px; border-radius: 10px; /* 44px: Apple's minimum tap size */
     border: 1px solid var(--bg); background: none; color: var(--bg); font-weight: 700;
   }
+  /* The X that closes the bar: a 44px tap target (Apple's minimum), plain, so Undo stays the main button */
+  .undo-close {
+    flex: none; width: 44px; height: 44px; margin-left: -6px; border: 0; background: none; color: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .undo-close svg { width: 20px; height: 20px; }
   /* Room under the list so the Undo bar never covers the last buttons */
   #libraryView.has-undo { padding-bottom: calc(env(safe-area-inset-bottom) + 96px); }
 
@@ -475,7 +482,6 @@
 <!-- ===================== Library (home) ===================== -->
 <main id="libraryView" class="view">
   <h1 class="app-title">Read Later</h1>
-  <p class="app-sub">Copy text anywhere, then tap Paste. Your documents stay on this phone.</p>
 
   <!-- Words only, no icon: the icon pushed the words off center -->
   <button id="pasteBtn" class="btn-primary" type="button">
@@ -522,10 +528,14 @@
   </div>
   <input id="restoreFile" type="file" accept=".json,application/json" hidden>
 
-  <!-- Undo after a delete. Stays until you add a new document or close the app. -->
+  <!-- Undo after a delete. Stays until you tap its X or close the app. -->
   <div id="undoBar" class="undo-bar" role="status" hidden>
     <span id="undoText" class="undo-text"></span>
     <button id="undoBtn" class="undo-btn" type="button">Undo</button>
+    <!-- Close: you know you don't want them back. Makes the deletes final (v6.3, Gary 2026-11-20). -->
+    <button id="undoClose" class="undo-close" type="button" aria-label="Close. The deletes become final.">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
   </div>
 </main>
 
@@ -743,7 +753,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '6.2';
+  const APP_VERSION = '6.3';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -953,7 +963,7 @@
       del.setAttribute('aria-label', 'Delete ' + d.title);
       del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
       del.addEventListener('click', () => {
-        if (!confirm('Delete "' + d.title + '"? You can undo this until you add a new document or close the app.')) return;
+        if (!confirm('Delete "' + d.title + '"? You can undo this until you close the app.')) return;
         deleteDocs(docs.filter(x => x.id === d.id), 'Deleted “' + clip(d.title, 40) + '”');
       });
 
@@ -981,14 +991,13 @@
 
   // ---------- Undo after a delete ----------
   // Every delete (one document, or Delete all) goes on this list, newest last. The list lives only
-  // in memory: it ends when you add a new document or close the app (restoring a backup leaves it
+  // in memory: it ends when you tap the bar's X or close the app (restoring a backup leaves it
   // alone; see importBackup). The deleted records are kept whole, so their highlights, notes,
   // reading spot, pin and place in the list all come back. (Gary, 2026-11-19.)
   // v6.1 (Gary, 2026-11-20): any delete can come back on its own. With one delete, Undo brings it
   // straight back. With more, Undo opens "Recently deleted", one Bring back button per delete, so
   // you never have to undo the newer ones first.
   const undoList = [];
-  let deleteCount = 0; // goes up on every delete, never down (see addFromFile)
   function showUndo() {
     const n = undoList.length;
     $('undoBar').hidden = !n;
@@ -1004,7 +1013,6 @@
     const before = docs;
     docs = docs.filter(x => !removed.includes(x));
     if (!saveDocs()) { docs = before; return; } // saveDocs has already said why
-    deleteCount++;
     undoList.push({ label, removed });
     renderLibrary();
     showUndo();
@@ -1014,7 +1022,9 @@
     const i = undoList.indexOf(entry);
     if (i < 0) return;
     const before = docs;
-    docs = docs.concat(entry.removed.filter(r => !docs.some(d => d.id === r.id)));
+    // Skip any whose text you've since pasted again (now that a new document doesn't end Undo, v6.3):
+    // bringing it back would make a second copy.
+    docs = docs.concat(entry.removed.filter(r => !docs.some(d => d.id === r.id || d.text === r.text)));
     if (!saveDocs()) { docs = before; return; } // still undoable once there's room
     undoList.splice(i, 1);
     renderLibrary();
@@ -1240,7 +1250,7 @@
   async function restoreFromFile(file) {
     let res;
     try { res = readBackup(await file.text()); } catch (e) { res = { error: 'unreadable', added: 0 }; }
-    if (res.error === 'undo-pending') { toast('First tap Undo at the bottom to bring back what you just deleted, then restore. (Or add a document, which ends Undo.)', 8000); return; }
+    if (res.error === 'undo-pending') { toast('First tap Undo at the bottom to bring back what you deleted, or close the Undo bar with its X. Then restore.', 8000); return; }
     if (res.error === 'newer') { toast('That backup was made by a newer Read Later. Open the app with internet to update it first.', 6000); return; }
     if (res.error) { toast('That file isn’t a Read Later backup. To add a PDF, Word or text file, use Add from a file.', 6000); return; }
     if (!res.incoming.length) { toast(('Nothing new to restore. ' + restoreExtras(res)).trim(), 6000); return; }
@@ -1311,12 +1321,12 @@
     const res = saveRestored(r.incoming.filter(d => ids.includes(d.id)));
     if (res.error === 'not-saved') return; // saveDocs has already said why; the pop-up stays so you can untick some
     closeRestorePick();
-    if (res.error === 'undo-pending') { toast('First tap Undo at the bottom, then restore.', 6000); return; }
+    if (res.error === 'undo-pending') { toast('First tap Undo at the bottom, or close the Undo bar with its X. Then restore.', 6000); return; }
     toast(((res.added ? 'Restored ' + plural(res.added, 'document') + '.' : 'Nothing new to restore.') + ' ' + restoreExtras(r)).trim(), 6000);
   }
 
   // title: optional (a file's name); without it the first line of the text becomes the title.
-  function addDoc(text, title, keepUndo) {
+  function addDoc(text, title) {
     const clean = text.trim();
     if (!clean) { toast('There’s no text to save. Copy something first.'); return; }
     // Bigger than the whole of the app's storage: deleting old documents couldn't make room, so
@@ -1337,9 +1347,8 @@
     };
     docs.push(doc);
     if (!saveDocs()) { docs.pop(); return; }
-    // A new document ends the chance to undo earlier deletes (Gary, 2026-11-19). keepUndo: a file
-    // that finished reading after you deleted something meanwhile leaves that delete undoable.
-    if (!keepUndo) clearUndo();
+    // A new document no longer ends Undo (v6.3, Gary 2026-11-20). Only the X on the Undo bar, or
+    // closing the app, ends it.
     askToKeepData(); // a tap just happened, which some phones want before saying yes
     openDoc(doc.id);
   }
@@ -1367,7 +1376,6 @@
     const name = file.name || '';
     const ext = ((name.match(/\.([A-Za-z0-9]+)$/) || [])[1] || '').toLowerCase();
     const type = file.type || '';
-    const deletesAtStart = deleteCount; // see addDoc's keepUndo (a count, not the list length: Bring back shortens the list)
     if (file.size > MAX_FILE) { toast('That file is too big to open (over 60 MB).', 6000); return; }
     let text;
     try {
@@ -1399,7 +1407,7 @@
       toast(ext === 'pdf' ? 'This PDF has no text in it, only pictures of pages.' : 'There’s no text in that file.', 6000);
       return;
     }
-    addDoc(text, fileTitle(name), deleteCount > deletesAtStart);
+    addDoc(text, fileTitle(name));
   }
 
   // Pulls one file out of a zip (a .docx is a zip). Returns its text, or null if it isn't there.
@@ -2740,10 +2748,16 @@
     addDoc(t);
   });
   $('deleteAll').addEventListener('click', () => {
-    if (!confirm('Delete all ' + docs.length + ' saved documents? You can undo this until you add a new document or close the app.')) return;
+    if (!confirm('Delete all ' + docs.length + ' saved documents? You can undo this until you close the app.')) return;
     deleteDocs(docs.slice(), 'Deleted all ' + docs.length + (docs.length === 1 ? ' document' : ' documents'));
   });
   $('undoBtn').addEventListener('click', undoTap);
+  // The X makes the deletes final. It sits right next to Undo, so it asks first (v6.3).
+  $('undoClose').addEventListener('click', () => {
+    const n = undoList.reduce((s, u) => s + u.removed.length, 0);
+    if (!confirm('Close? The ' + (n === 1 ? 'deleted document' : plural(n, 'deleted document')) + ' can’t be brought back after this.')) return;
+    clearUndo();
+  });
   $('undoDone').addEventListener('click', () => { $('undoWrap').hidden = true; });
   $('undoBackdrop').addEventListener('click', () => { $('undoWrap').hidden = true; });
   $('backupBtn').addEventListener('click', saveBackup);
