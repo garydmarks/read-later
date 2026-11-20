@@ -466,6 +466,9 @@
     background: var(--ink); color: var(--bg);
     padding: 12px 16px; border-radius: 12px; font-size: 15px; z-index: 40;
     box-shadow: var(--shadow);
+    /* v6.8 (Gary, 2026-11-20): a message never blocks a tap. Taps go straight through it to the
+       button underneath, so "Tap Read copied text again" can be done at once, message or not. */
+    pointer-events: none;
   }
 </style>
 </head>
@@ -746,7 +749,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '6.7';
+  const APP_VERSION = '6.8';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1444,16 +1447,10 @@
   async function pasteFromClipboard() {
     try {
       // iPhone shows a small "Paste" bubble here; one tap lets us read what you copied.
-      let text;
-      try {
-        text = await navigator.clipboard.readText();
-      } catch (first) {
-        // v6.6 (Gary, 2026-11-20): when iPhone shows its big "Allow Paste" box, the read fails
-        // (NotAllowedError) even after Allow, yet the next try usually gets the small Paste
-        // bubble and works. So try once more by itself. If Safari refuses a second read without a
-        // new tap, this fails the same way and the messages below take over. Only one retry.
-        text = await navigator.clipboard.readText();
-      }
+      // One read per tap. (v6.6 and v6.7 retried once by itself; on Gary's iPhone the retry never
+      // worked, since Safari wants a fresh tap for each read, and with it the next tap failed too,
+      // where in 6.5 the next tap worked. So v6.8 took it out.)
+      const text = await navigator.clipboard.readText();
       pasteFailedAt = 0;
       if (!text || !text.trim()) { toast('Your clipboard is empty. Copy some text first.'); return; }
       addDoc(text);
