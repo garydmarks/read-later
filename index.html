@@ -759,7 +759,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '6.9';
+  const APP_VERSION = '7.0';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1467,7 +1467,9 @@
   }
   document.addEventListener('visibilitychange', () => { if (document.hidden) pasteNote(''); });
 
-  let pasteFailedAt = 0; // when the last paste was refused (0 = the last one worked)
+  // True while the typing box is open because iPhone refused a paste (not because you tapped
+  // "Type or paste"). While it's true, a paste into the empty box is saved and read at once.
+  let manualFromRefusal = false;
   async function pasteFromClipboard() {
     try {
       // iPhone shows a small "Paste" bubble here; one tap lets us read what you copied.
@@ -1475,27 +1477,22 @@
       // worked, since Safari wants a fresh tap for each read, and with it the next tap failed too,
       // where in 6.5 the next tap worked. So v6.8 took it out.)
       const text = await navigator.clipboard.readText();
-      pasteFailedAt = 0;
       if (!text || !text.trim()) { pasteNote('Your clipboard is empty. Copy some text first.'); return; }
+      // The box a refusal opened has done its job. (A box you opened yourself is left alone.)
+      if (manualFromRefusal) closeManual();
       pasteNote('');
       addDoc(text);
     } catch (e) {
-      // v6.5 (Gary, 2026-11-20): after a manual copy in Outlook, iPhone sometimes shows its big
-      // "Allow Paste" box, and the read fails even after Allow. Tapping the button again works,
-      // so the first refusal says that and stays on this screen. A second refusal in a row (within
-      // 2 minutes) means tapping again isn't helping, so it opens the typing box instead: the
-      // message never asks for a third try. Neither message blocks anything: the buttons work
-      // while it shows. (v6.5 and v6.6 ended each message with iPhone's reason code; it read
-      // NotAllowedError, a permission refusal, so v6.7 dropped the code as jargon.)
-      const again = pasteFailedAt && Date.now() - pasteFailedAt < 120000;
-      if (again) {
-        pasteFailedAt = 0;
-        openManual();
-        pasteNote('iPhone stopped it again. Press and hold in the box, then tap Paste.');
-      } else {
-        pasteFailedAt = Date.now();
-        pasteNote('iPhone stopped that paste. Tap Read copied text again, or use Type or paste.');
-      }
+      // After a manual copy in another app, iPhone shows its big "Allow Paste" box, and the read
+      // fails even after Allow (a permission refusal, NotAllowedError). Tapping the button again
+      // works. v7.0 (Gary, 2026-11-24): every refusal now leads to the same screen. The typing box
+      // opens and one message names both ways on: tap the button again, or paste in the box.
+      // (v6.5 to v6.9 kept count: the first refusal showed words only and a second one within 2
+      // minutes opened the box and said "stopped it again", which on the iPhone showed up when one
+      // more tap would have worked.) Nothing here blocks anything: the buttons work while it shows.
+      openManual();
+      manualFromRefusal = true;
+      pasteNote('iPhone wants one more tap. Tap Read copied text again, or paste in the box and it starts reading.');
     }
   }
   // ---------- Add from a file (PDF, Word .docx, or plain text) ----------
@@ -1683,7 +1680,7 @@
   }
 
   function openManual() { $('manualBox').hidden = false; $('manualText').focus(); }
-  function closeManual() { $('manualBox').hidden = true; $('manualText').value = ''; pasteNote(''); }
+  function closeManual() { $('manualBox').hidden = true; $('manualText').value = ''; manualFromRefusal = false; pasteNote(''); }
 
   // ---------- Reader state ----------
   let cur = null;        // the open document
@@ -2878,6 +2875,17 @@
   $('manualSave').addEventListener('click', () => {
     const t = $('manualText').value;
     if (!t.trim()) { toast('The box is empty.'); return; }
+    closeManual();
+    addDoc(t);
+  });
+  // v7.0: when a refused paste opened the box, pasting into the empty box saves and reads at once
+  // (no Save and read tap). A box you opened with "Type or paste" keeps the paste as plain text to
+  // edit, and so does a box that already has words in it.
+  $('manualText').addEventListener('paste', (e) => {
+    if (!manualFromRefusal || $('manualText').value) return;
+    const t = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+    if (!t.trim()) return; // nothing readable handed over: let the normal paste happen
+    e.preventDefault();
     closeManual();
     addDoc(t);
   });
