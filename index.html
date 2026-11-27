@@ -778,6 +778,21 @@
   </div>
 </div>
 
+<!-- ===================== Skipping a number on its own (v7.4) ===================== -->
+<!-- You choose how far it goes, so nothing is skipped that you didn't mean (Gary, 2026-11-27). -->
+<div id="numWrap" class="sheet-wrap" hidden>
+  <button id="numBackdrop" class="backdrop" type="button" aria-label="Cancel"></button>
+  <div class="sheet" role="dialog" aria-labelledby="numTitle">
+    <div class="sheet-head">
+      <h2 id="numTitle">Skip a number</h2>
+    </div>
+    <p class="hint">Only lines that hold nothing but the number are skipped. Numbers inside sentences are still read.</p>
+    <button id="numAny" class="btn-secondary" type="button">Every line like it, any number</button>
+    <button id="numExact" class="btn-secondary" type="button">Only lines that say exactly this</button>
+    <button id="numCancel" class="btn-secondary" type="button">Cancel</button>
+  </div>
+</div>
+
 
 <div id="toast" class="toast" role="status" hidden></div>
 
@@ -787,7 +802,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '7.3';
+  const APP_VERSION = '7.4';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1284,6 +1299,9 @@
     marksFor: isNat,
     // v7.1 skipped phrases: a short list of short strings (the same limits addSkip keeps to).
     skips: (v) => Array.isArray(v) && v.length <= SKIPS_MAX
+      && v.every(s => typeof s === 'string' && s.trim().length > 0 && s.length <= SKIP_LEN),
+    // v7.4: the lone numbers on that list skipped only where they say exactly that (same limits).
+    skipExact: (v) => Array.isArray(v) && v.length <= SKIPS_MAX
       && v.every(s => typeof s === 'string' && s.trim().length > 0 && s.length <= SKIP_LEN),
   };
   const MARK_FIELDS = {
@@ -2323,7 +2341,7 @@
 
   // A finger drag or mouse wheel is always you, never the app, so it ends the "app is scrolling" window at once.
   for (const type of ['touchmove', 'wheel']) {
-    window.addEventListener(type, () => { autoScrollUntil = 0; turnUntil = 0; }, { passive: true }); // also ends a turn's window
+    window.addEventListener(type, () => { autoScrollUntil = 0; turnUntil = 0; refitUntil = 0; }, { passive: true }); // also ends a turn's (or search's) settle window
   }
 
   // Your finger scrolled the page: stop following if the spot went off screen, start again if it came back.
@@ -2655,7 +2673,9 @@
   // acrossParas (Skip, v7.2): the whole document is one run of text, with a space between
   // paragraphs too, so a phrase selected across two lines ("12 minutes left in chapter" / "80%")
   // matches as one (Gary, 2026-11-27).
-  function matchRanges(re, acrossParas) {
+  // wholeWords (Skip, v7.4): a match may not start or end inside a word or number, so skipping
+  // "chapter" leaves "chapters" alone (Search still finds part of a word, as before).
+  function matchRanges(re, acrossParas, wholeWords) {
     const out = [];
     let i = 0;
     while (i < sents.length) {
@@ -2666,12 +2686,18 @@
         texts.push(sents[i].t);
         len += sents[i].t.length + 1;
       }
-      for (const m of texts.join(' ').matchAll(re)) {
+      const txt = texts.join(' ');
+      for (const m of txt.matchAll(re)) {
+        if (wholeWords && cutsWord(txt, m.index, m.index + m[0].length)) continue;
         out.push({ a: paraPoint(starts, m.index, false), b: paraPoint(starts, m.index + m[0].length, true) });
       }
     }
     return out;
   }
+  const isWordChar = (c) => !!c && /[\p{L}\p{N}]/u.test(c);
+  // True if the stretch from..to begins or ends in the middle of a word ("chapter" inside "chapters").
+  const cutsWord = (t, from, to) =>
+    (isWordChar(t[from]) && isWordChar(t[from - 1])) || (isWordChar(t[to - 1]) && isWordChar(t[to]));
   function runFind(q) {
     finds = [];
     findAt = -1;
@@ -2748,7 +2774,7 @@
     skipRanges = [];
     skipCounts = [];
     ((cur && cur.skips) || []).forEach((q, k) => {
-      const ranges = matchRanges(findPattern(q, true), true);
+      const ranges = skipMatches(q, isExact(q));
       skipCounts.push(ranges.length);
       for (const r of ranges) {
         skipRanges.push({ ...r, k }); // k = which phrase on the list (Unskip removes it)
@@ -2790,24 +2816,87 @@
     CSS.highlights.set('rl-skip', all);
   }
 
-  // Same phrase = same pattern (capitals, spacing, quote style and the numbers themselves don't matter).
-  const skipKey = (q) => findPattern(q, true).source.toLowerCase();
+  // Where phrase q is skipped (v7.4; Gary, 2026-11-27: "I just don't want to skip things I don't mean to skip").
+  // - A phrase with words in it: wherever it appears as whole words, with any numbers in it, so
+  //   "12 minutes left in chapter" also skips "9 minutes left in chapter".
+  // - A phrase that is only numbers and symbols ("80%", "415", a phone number): only where it is a whole
+  //   line (paragraph) by itself, never inside a sentence. Before 7.4, skipping "80%" silenced every
+  //   percentage in the document, even "a 45% risk". You choose, when you skip it, whether other numbers
+  //   count too ("every line like it": 81%, 82%...) or only that exact one (cur.skipExact lists those).
+  const numbersOnly = (q) => !/\p{L}/u.test(q);
+  const isExact = (q) => !!(cur && cur.skipExact && cur.skipExact.includes(q));
+  function skipMatches(q, exact) {
+    const re = findPattern(q, !exact);
+    if (!numbersOnly(q)) return matchRanges(re, true, true);
+    return matchRanges(new RegExp('^\\s*(?:' + re.source + ')\\s*$', 'gi'), false);
+  }
+  // Same phrase = same pattern (capitals, spacing and quote style don't matter; for "any number"
+  // phrases the numbers themselves don't matter either).
+  const skipKey = (q, exact) => (exact ? '=' : '#') + findPattern(q, !exact).source.toLowerCase();
   const shortQ = (q) => (q.length > 40 ? q.slice(0, 38).trimEnd() + '…' : q);
-  // Adds a phrase to this document's skip list. Returns how many places it skips (0 = not added).
+  // Adds a phrase to this document's skip list. Returns how many places it skips, 0 if nothing was
+  // added, or -1 if a pop-up is asking how far a lone number should go (it adds it once you choose).
   function addSkip(raw) {
     if (!cur) return 0;
     const q = String(raw).replace(/\s+/g, ' ').trim();
     if (!hasWords(q)) { toast('Select some words to skip.'); return 0; }
     if (q.length > SKIP_LEN) { toast('That’s too long to skip. Select a shorter phrase, like a page footer.'); return 0; }
     const list = cur.skips || [];
-    if (list.some(s => skipKey(s) === skipKey(q))) { toast('Already skipped. See Options to read it again.'); return 0; }
+    // Already covered: the same phrase, or an "any number" one of the same shape.
+    if (list.some(s => skipKey(s, isExact(s)) === skipKey(q, false) || (isExact(s) && skipKey(s, true) === skipKey(q, true)))) {
+      toast('Already skipped. See Options to read it again.');
+      return 0;
+    }
     if (list.length >= SKIPS_MAX) { toast('This document already skips ' + SKIPS_MAX + ' phrases. Remove one in Options first.'); return 0; }
-    const n = matchRanges(findPattern(q, true), true).length;
-    if (!n) { toast('Couldn’t find that in this document.'); return 0; }
+    if (!numbersOnly(q)) {
+      const n = skipMatches(q, false).length;
+      if (!n) { toast('Couldn’t find that in this document.'); return 0; }
+      return commitSkip(q, false, n);
+    }
+    const anyN = skipMatches(q, false).length, exactN = skipMatches(q, true).length;
+    // The number you picked must itself stand on a line of its own. Otherwise ("45%" inside a sentence)
+    // offering "every line like it" would skip other lines and not the one you chose.
+    if (!exactN) {
+      toast(matchRanges(findPattern(q, false), true).length
+        ? 'A number on its own is skipped only on a line by itself, like a page number. To skip it here, select the words around it too.'
+        : 'Couldn’t find that in this document.', 5000);
+      return 0;
+    }
+    // Nothing differs between the two choices: no need to ask. "Exact" is the narrower record to keep.
+    if (anyN === exactN) return commitSkip(q, true, exactN);
+    askNumber(q, anyN, exactN);
+    return -1;
+  }
+  function commitSkip(q, exact, n) {
+    let list = cur.skips || [], ex = cur.skipExact || [];
+    // "Any number" covers an exact one of the same shape (80% exact, then 81% any): drop the exact one.
+    if (!exact) {
+      const covered = list.filter(s => ex.includes(s) && skipKey(s, false) === skipKey(q, false));
+      list = list.filter(s => !covered.includes(s));
+      ex = ex.filter(s => !covered.includes(s));
+    }
     cur.skips = list.concat(q);
+    if (exact) ex = ex.concat(q);
+    if (ex.length) cur.skipExact = ex; else delete cur.skipExact;
     saveSkips();
+    fillSkips();
     toast('Skipping “' + shortQ(q) + '” (' + plural(n, 'place') + '). To read it again: Options.', 4000);
     return n;
+  }
+  // The pop-up for a lone number: every line like it, or only that exact one (Gary's pick, 2026-11-27).
+  let askingNumber = null;
+  function askNumber(q, anyN, exactN) {
+    askingNumber = { q, anyN, exactN };
+    $('numTitle').textContent = 'Skip “' + shortQ(q) + '”';
+    $('numAny').textContent = 'Every line like it, any number (' + plural(anyN, 'place') + ')';
+    $('numExact').textContent = 'Only exactly “' + shortQ(q) + '” (' + plural(exactN, 'place') + ')';
+    $('numWrap').hidden = false;
+  }
+  function answerNumber(exact) {
+    const a = askingNumber;
+    askingNumber = null;
+    $('numWrap').hidden = true;
+    if (a && exact !== null && cur) commitSkip(a.q, exact, exact ? a.exactN : a.anyN);
   }
   // Takes phrase number k (or several, from Unskip) off the list, so it's read again.
   function removeSkip(k) { removeSkips([k]); }
@@ -2817,6 +2906,10 @@
     if (!gone.length) return 0;
     cur.skips = cur.skips.filter((_, j) => !ks.includes(j));
     if (!cur.skips.length) delete cur.skips; // keep the saved record exactly as it was before any skips
+    if (cur.skipExact) {
+      cur.skipExact = cur.skipExact.filter(s => (cur.skips || []).includes(s));
+      if (!cur.skipExact.length) delete cur.skipExact;
+    }
     saveSkips();
     fillSkips();
     toast(gone.length === 1 ? '“' + shortQ(gone[0]) + '” will be read again.' : plural(gone.length, 'skipped phrase') + ' will be read again.');
@@ -2853,7 +2946,8 @@
       txt.textContent = q;
       const n = document.createElement('span');
       n.className = 'skip-n';
-      n.textContent = skipCounts[k] ? plural(skipCounts[k], 'place') : 'Not found in this document';
+      n.textContent = (skipCounts[k] ? plural(skipCounts[k], 'place') : 'Not found in this document')
+        + (numbersOnly(q) ? (isExact(q) ? ' · lines that say exactly this' : ' · every line like it, any number') : '');
       txt.appendChild(n);
       const x = document.createElement('button');
       x.type = 'button';
@@ -2896,6 +2990,7 @@
     $('findInput').hidden = false;
     $('findDone').hidden = false;
     $('findRow').hidden = false;
+    pinTopbar();
     $('findInput').focus();
     $('findInput').select();
     runFind($('findInput').value); // reopening keeps your last search
@@ -2912,6 +3007,31 @@
     $('findInput').hidden = true;
     $('findDone').hidden = true;
     $('findRow').hidden = true;
+    pinTopbar(); // back to its normal place
+  }
+  // Search with the keyboard open (v7.4). The iPhone can slide the part of the page you see down
+  // under the keyboard, which carried the top bar (and the search box in it) off the top of the
+  // screen (Gary's screenshot, 2026-11-27). While Search is open, the top bar moves down with what
+  // you can see. visualViewport.offsetTop = how far that visible part has slid down.
+  function findIsOpen() { return !$('findRow').hidden; }
+  function pinTopbar() {
+    const y = findIsOpen() && window.visualViewport ? Math.max(0, visualViewport.offsetTop) : 0;
+    document.querySelector('#readerView .topbar').style.transform = y ? 'translateY(' + y + 'px)' : '';
+  }
+  // When the keyboard finishes opening (or the phone turns) with Search open, the visible part changes
+  // size: bring the current match back to the middle of it, so it isn't left behind the keyboard.
+  // Like turning the phone (startTurn), it's done several times while the iPhone settles, so a layout
+  // that lands late still ends on the match. A finger on the page stops it (refitUntil = 0).
+  let refitTimers = [], refitUntil = 0;
+  function refitFind() {
+    pinTopbar();
+    refitUntil = Date.now() + TURN_WINDOW_MS;
+    refitTimers.forEach(clearTimeout);
+    refitTimers = TURN_RECENTER_MS.map(ms => setTimeout(() => {
+      if (!refitUntil || !findIsOpen() || findAt < 0 || !finds.length) return;
+      pinTopbar();
+      scrollToFind();
+    }, ms));
   }
   // "Read from here": moves your reading spot to the match's sentence and starts reading.
   function readFromFind() {
@@ -3128,7 +3248,7 @@
     if (file) await addFromFile(file);
   });
 
-  $('readerBack').addEventListener('click', () => { stop(); closeFind(); cur = null; renderLibrary(); show('libraryView'); });
+  $('readerBack').addEventListener('click', () => { stop(); closeFind(); answerNumber(null); cur = null; renderLibrary(); show('libraryView'); });
 
   // Search: results update as you type (after a short pause); the keyboard's Search key goes to the next match.
   $('findBtn').addEventListener('click', openFind);
@@ -3159,6 +3279,10 @@
     if (!finds.length) return;
     if (addSkip($('findInput').value)) closeFind();
   });
+  $('numAny').addEventListener('click', () => answerNumber(false));
+  $('numExact').addEventListener('click', () => answerNumber(true));
+  $('numCancel').addEventListener('click', () => answerNumber(null));
+  $('numBackdrop').addEventListener('click', () => answerNumber(null));
   $('skipList').addEventListener('click', (e) => {
     const x = e.target.closest('.skip-x');
     if (x) removeSkip(+x.dataset.k);
@@ -3230,6 +3354,9 @@
     };
     visualViewport.addEventListener('resize', fitNote);
     visualViewport.addEventListener('scroll', fitNote);
+    // Search (v7.4): keep the top bar on screen, and the current match above the keyboard.
+    visualViewport.addEventListener('scroll', pinTopbar);
+    visualViewport.addEventListener('resize', refitFind);
   }
 
   // Highlights and notes list
@@ -3318,6 +3445,7 @@
     turnTimers = TURN_RECENTER_MS.map(ms => setTimeout(() => {
       viewWidth = window.innerWidth;
       if (!turnUntil || !followAtTurn) return; // a finger took over, or you had scrolled away before turning
+      if (findIsOpen()) return; // v7.4: while searching, the current match is brought back instead (refitFind)
       follow = true;
       scrollToCurrent(false);
     }, ms));
@@ -3355,6 +3483,7 @@
     finds: () => finds.map(f => ({ ...f, text: findRange(f).toString() })), findAt: () => findAt, stepFind,
     // v7.1: skipped phrases. spoken(i) = exactly what the voice says for sentence i.
     addSkip, removeSkip, skips: () => (cur && cur.skips) || [], spoken, skipCounts: () => skipCounts,
+    skipExact: () => (cur && cur.skipExact) || [],
     skipPainted: () => (canPaint && CSS.highlights.has('rl-skip')) ? [...CSS.highlights.get('rl-skip')].map(r => r.toString()) : null,
     sents: () => sents.map(s => s.t)
   };
