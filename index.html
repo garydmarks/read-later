@@ -787,7 +787,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '7.2';
+  const APP_VERSION = '7.3';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1726,10 +1726,13 @@
   // While the controls slide up or down, "Back to reading spot" stays hidden whoever asks to show it
   // (a sentence ending mid-slide used to bring it back over Play / Back / Forward). Set in setCollapsed.
   let pillHoldUntil = 0;
-  // Turning the phone (v7.1): the width the page was last laid out for. While the width differs, the
-  // phone is mid-turn, so its scrolls don't count as yours. 300 ms lets iPhone finish the new layout.
-  let viewWidth = window.innerWidth, turnTimer = 0;
-  const TURN_SETTLE_MS = 300;
+  // Turning the phone (v7.1, made sturdier in v7.3): viewWidth = the width the page was last laid out
+  // for. A turn opens a 1.5 s window: the app re-centers several times inside it (iPhone can finish its
+  // layout well after the first resize, so 7.1's single re-center at 300 ms could land too early and
+  // lose the spot again; Gary, 2026-11-27), and scrolls inside it are the phone's, not yours. A finger
+  // on the screen ends the window at once.
+  let viewWidth = window.innerWidth, turnTimers = [], turnUntil = 0, followAtTurn = false;
+  const TURN_RECENTER_MS = [150, 400, 800, 1300], TURN_WINDOW_MS = 1500;
   let finds = [];        // search matches: [{a: {i, o}, b: {i, o}}] (start and end, as sentence + character)
   let findAt = -1;       // the match you're on
   let findTimer = 0;     // a search waiting for you to pause typing (0 = none)
@@ -2320,7 +2323,7 @@
 
   // A finger drag or mouse wheel is always you, never the app, so it ends the "app is scrolling" window at once.
   for (const type of ['touchmove', 'wheel']) {
-    window.addEventListener(type, () => { autoScrollUntil = 0; }, { passive: true });
+    window.addEventListener(type, () => { autoScrollUntil = 0; turnUntil = 0; }, { passive: true }); // also ends a turn's window
   }
 
   // Your finger scrolled the page: stop following if the spot went off screen, start again if it came back.
@@ -2329,8 +2332,8 @@
     updateKnob();
     if (Date.now() < autoScrollUntil) return;
     // Turning the phone re-wraps the text and moves it under the screen. That scroll is the phone, not
-    // you, so it must not switch following off (v7.1; the resize handler re-centers once it settles).
-    if (window.innerWidth !== viewWidth) return;
+    // you, so it must not switch following off, for the whole turn window (v7.3; see startTurn).
+    if (window.innerWidth !== viewWidth || Date.now() < turnUntil) return;
     const r = curRect();
     const strip = visibleStrip();
     follow = !!r && r.bottom > strip.top && r.top < strip.bottom;
@@ -3304,17 +3307,29 @@
   // re-wrapped text slid away, and you had to tap "Back to reading spot"; Gary, 2026-11-27).
   // Only a change of WIDTH counts as a turn: Safari's bars and the keyboard change only the height,
   // and treating those as a turn would pull the page back while you scroll away.
+  // v7.3: one turn = one window. Whether the page was following is remembered at the FIRST event of
+  // the turn (a late scroll from the re-wrap can't change it), and the sentence is brought back several
+  // times while the iPhone settles, so a layout that lands late still ends centered.
+  function startTurn() {
+    if (!(cur && currentView() === 'readerView')) { viewWidth = window.innerWidth; return; }
+    if (Date.now() >= turnUntil) followAtTurn = follow; // first event of this turn
+    turnUntil = Date.now() + TURN_WINDOW_MS;
+    turnTimers.forEach(clearTimeout);
+    turnTimers = TURN_RECENTER_MS.map(ms => setTimeout(() => {
+      viewWidth = window.innerWidth;
+      if (!turnUntil || !followAtTurn) return; // a finger took over, or you had scrolled away before turning
+      follow = true;
+      scrollToCurrent(false);
+    }, ms));
+  }
   window.addEventListener('resize', () => {
     if (!(cur && currentView() === 'readerView')) { viewWidth = window.innerWidth; return; }
     fitPadding();
     updatePill();
-    if (window.innerWidth === viewWidth) return;
-    clearTimeout(turnTimer);
-    turnTimer = setTimeout(() => {
-      viewWidth = window.innerWidth; // from here on, scrolls are yours again
-      if (follow) scrollToCurrent(false);
-    }, TURN_SETTLE_MS);
+    if (window.innerWidth !== viewWidth || Date.now() < turnUntil) startTurn();
   });
+  // iPhone also announces the turn itself; its width can still read the old value at that moment.
+  window.addEventListener('orientationchange', startTurn);
 
   // Offline support: lets the app open with no internet after the first visit.
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
