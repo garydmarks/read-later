@@ -601,7 +601,8 @@
     <button class="mk-btn" type="button" data-act="note">Note</button>
     <button id="markRemove" class="mk-btn" type="button" data-act="remove">Remove</button>
     <!-- v7.1: never read these words anywhere in this document (a journal footer, for example) -->
-    <button class="mk-btn" type="button" data-act="skip">Skip</button>
+    <!-- v7.2: reads "Unskip" when the selection touches skipped words (the whole phrase is read again) -->
+    <button id="markSkip" class="mk-btn" type="button" data-act="skip">Skip</button>
   </div>
 
   <div id="controls" class="controls">
@@ -786,7 +787,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '7.1';
+  const APP_VERSION = '7.2';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -1987,6 +1988,10 @@
     bar.hidden = !r;
     if (r) {
       $('markRemove').hidden = !overlapsAny(r);
+      // Skip or Unskip (v7.2): touching any skipped words offers to read them again instead.
+      const un = skipsTouching(r).length > 0;
+      $('markSkip').dataset.act = un ? 'unskip' : 'skip';
+      $('markSkip').textContent = un ? 'Unskip' : 'Skip';
       placeMarkBar(bar);
     }
     updatePill();
@@ -2025,6 +2030,7 @@
     if (btn.dataset.c) { addMark(r, btn.dataset.c); return; }
     if (btn.dataset.act === 'remove') { removeMarksIn(r); return; }
     if (btn.dataset.act === 'skip') { addSkip(sliceText(r.s, r.a, r.e, r.b)); return; }
+    if (btn.dataset.act === 'unskip') { removeSkips(skipsTouching(r)); return; }
     // Note: inside one highlight already? Open its note. Otherwise make a yellow one and open that.
     const inside = (cur.marks || []).find(m => cmp(m.s, m.a, r.s, r.a) <= 0 && cmp(r.e, r.b, m.e, m.b) <= 0);
     const m = inside || addMark(r, 'yellow');
@@ -2641,15 +2647,18 @@
   }
 
   // Every match of `re` in the document, as [{a: {i, o}, b: {i, o}}]. Shared by Search and Skip.
-  // Searches paragraph by paragraph (sentences joined with a space, the way they show on screen),
+  // Search goes paragraph by paragraph (sentences joined with a space, the way they show on screen),
   // so a phrase that runs from one sentence piece into the next is still found.
-  function matchRanges(re) {
+  // acrossParas (Skip, v7.2): the whole document is one run of text, with a space between
+  // paragraphs too, so a phrase selected across two lines ("12 minutes left in chapter" / "80%")
+  // matches as one (Gary, 2026-11-27).
+  function matchRanges(re, acrossParas) {
     const out = [];
     let i = 0;
     while (i < sents.length) {
       const p = sents[i].p, starts = [], texts = [];
       let len = 0;
-      for (; i < sents.length && sents[i].p === p; i++) {
+      for (; i < sents.length && (acrossParas || sents[i].p === p); i++) {
         starts.push({ i, at: len });
         texts.push(sents[i].t);
         len += sents[i].t.length + 1;
@@ -2735,11 +2744,11 @@
     skipCuts = new Map();
     skipRanges = [];
     skipCounts = [];
-    for (const q of (cur && cur.skips) || []) {
-      const ranges = matchRanges(findPattern(q, true));
+    ((cur && cur.skips) || []).forEach((q, k) => {
+      const ranges = matchRanges(findPattern(q, true), true);
       skipCounts.push(ranges.length);
       for (const r of ranges) {
-        skipRanges.push(r);
+        skipRanges.push({ ...r, k }); // k = which phrase on the list (Unskip removes it)
         for (let i = r.a.i; i <= r.b.i; i++) {
           const from = i === r.a.i ? r.a.o : 0;
           const to = i === r.b.i ? r.b.o : sents[i].t.length;
@@ -2748,7 +2757,7 @@
           skipCuts.get(i).push([from, to]);
         }
       }
-    }
+    });
     for (const list of skipCuts.values()) list.sort((x, y) => x[0] - y[0]);
   }
   // Sentence i with its skipped stretches blanked out (a space each, so the words either side stay apart).
@@ -2790,23 +2799,37 @@
     const list = cur.skips || [];
     if (list.some(s => skipKey(s) === skipKey(q))) { toast('Already skipped. See Options to read it again.'); return 0; }
     if (list.length >= SKIPS_MAX) { toast('This document already skips ' + SKIPS_MAX + ' phrases. Remove one in Options first.'); return 0; }
-    const n = matchRanges(findPattern(q, true)).length;
-    // A selection that crosses from one paragraph into the next can't be matched (matching is per paragraph).
-    if (!n) { toast('Couldn’t match that. Select words inside one paragraph.'); return 0; }
+    const n = matchRanges(findPattern(q, true), true).length;
+    if (!n) { toast('Couldn’t find that in this document.'); return 0; }
     cur.skips = list.concat(q);
     saveSkips();
     toast('Skipping “' + shortQ(q) + '” (' + plural(n, 'place') + '). To read it again: Options.', 4000);
     return n;
   }
-  // Takes phrase number k off the list, so it's read again.
-  function removeSkip(k) {
-    if (!cur || !cur.skips || !cur.skips[k]) return;
-    const q = cur.skips[k];
-    cur.skips = cur.skips.filter((_, j) => j !== k);
+  // Takes phrase number k (or several, from Unskip) off the list, so it's read again.
+  function removeSkip(k) { removeSkips([k]); }
+  function removeSkips(ks) {
+    if (!cur || !cur.skips) return 0;
+    const gone = cur.skips.filter((_, j) => ks.includes(j));
+    if (!gone.length) return 0;
+    cur.skips = cur.skips.filter((_, j) => !ks.includes(j));
     if (!cur.skips.length) delete cur.skips; // keep the saved record exactly as it was before any skips
     saveSkips();
     fillSkips();
-    toast('“' + shortQ(q) + '” will be read again.');
+    toast(gone.length === 1 ? '“' + shortQ(gone[0]) + '” will be read again.' : plural(gone.length, 'skipped phrase') + ' will be read again.');
+    return gone.length;
+  }
+  // Unskip (v7.2): the phrases with a skipped stretch touching selection r (from the highlight bar).
+  // The whole phrase comes back everywhere, even if only one word of it was selected (Gary's pick:
+  // un-skipping just the selected words would turn the leftovers into new phrases, and a short
+  // leftover like "the" would then be skipped all through the document). Skip the part you still
+  // want silent again with Skip.
+  function skipsTouching(r) {
+    const ks = new Set();
+    for (const x of skipRanges) {
+      if (cmp(x.b.i, x.b.o, r.s, r.a) > 0 && cmp(r.e, r.b, x.a.i, x.a.o) > 0) ks.add(x.k);
+    }
+    return [...ks];
   }
   function saveSkips() {
     savePos(true); // your own edit: always say if it couldn't be saved
