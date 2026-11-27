@@ -267,6 +267,9 @@
     text-decoration: underline 3px #e8590c;
   }
   ::highlight(rl-find-now) { background-color: #ff8c1a; color: #000; }
+  /* Skipped phrases (v7.1): faded and crossed out, so a quiet stretch never surprises you.
+     Drawn on top of the text like search matches, so the text itself (and your highlights) never change. */
+  ::highlight(rl-skip) { color: var(--muted); text-decoration: line-through 2px var(--muted); }
 
   /* ---------- The text being read ---------- */
   .reading {
@@ -330,6 +333,16 @@
     display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
   }
   .mark-n { margin-top: 4px; color: var(--muted); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Skipped phrases list in Options: the phrase, how many places, and an X (44px tap) to read it again */
+  .skip-list { list-style: none; margin: 0; padding: 0; }
+  .skip-row { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+  .skip-q { flex: 1; min-width: 0; padding: 8px 0; font-family: ui-serif, "New York", Georgia, serif; overflow-wrap: anywhere; }
+  .skip-n { display: block; color: var(--muted); font-family: inherit; font-size: 14px; }
+  .skip-x {
+    flex: none; width: 44px; height: 44px; border: 0; background: none; color: var(--muted);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .skip-x svg { width: 20px; height: 20px; }
 
   /* ---------- Bottom controls: small, and they slide away ---------- */
   .controls {
@@ -383,6 +396,10 @@
   @media (max-width: 380px) {
     .transport-mid { gap: 10px; }
     .chip { min-width: 48px; padding: 0 6px; }
+  }
+  /* The highlight bar tightens on every phone up to the biggest iPhone (430px): with Skip added in v7.1,
+     three dots plus Note, Remove and Skip ran wider than a 390px iPhone at the roomy sizes. */
+  @media (max-width: 440px) {
     .mark-bar { gap: 6px; padding: 5px 6px; }
     .mk-dot { width: 36px; height: 36px; }
     .mk-btn { padding: 0 10px; }
@@ -557,6 +574,8 @@
          down arrow, a slightly-off tap hit it and closed the search (Gary, iPhone, 2026-11-17) -->
     <div id="findRow" class="find-row" hidden>
       <button id="findRead" class="find-read" type="button">Read from here</button>
+      <!-- v7.1: skip every match when reading. Left side too, away from the arrows. -->
+      <button id="findSkip" class="find-read" type="button">Skip</button>
       <span id="findCount" class="find-count" aria-live="polite"></span>
       <button id="findPrev" class="round find-step" type="button" aria-label="Previous match">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
@@ -581,6 +600,8 @@
     <button class="mk-dot hl-red" type="button" data-c="red" aria-label="Red highlight"></button>
     <button class="mk-btn" type="button" data-act="note">Note</button>
     <button id="markRemove" class="mk-btn" type="button" data-act="remove">Remove</button>
+    <!-- v7.1: never read these words anywhere in this document (a journal footer, for example) -->
+    <button class="mk-btn" type="button" data-act="skip">Skip</button>
   </div>
 
   <div id="controls" class="controls">
@@ -665,6 +686,12 @@
         <button class="btn-secondary" type="button" data-mode="light">Light</button>
         <button class="btn-secondary" type="button" data-mode="dark">Dark</button>
       </div>
+    </div>
+
+    <!-- v7.1: phrases this document never reads aloud. Tap X to have one read again. -->
+    <div id="skipField" class="field" hidden>
+      <span class="field-label">Skipped when reading (tap × to read again)</span>
+      <ul id="skipList" class="skip-list"></ul>
     </div>
 
     <button id="marksBtn" class="btn-secondary" type="button">Highlights and notes</button>
@@ -759,7 +786,7 @@
 
   // The version shown at the bottom of Options. Change it with every update you publish, so a quick
   // look on the phone tells you whether the new version has arrived.
-  const APP_VERSION = '7.0';
+  const APP_VERSION = '7.1';
 
   // ---------- Small helpers (first, because the storage code below can show a message) ----------
   const $ = (id) => document.getElementById(id);
@@ -941,6 +968,9 @@
   }
   // Any letter or digit in any language (not only A to Z), so accented or non-English text isn't skipped.
   const hasWords = (t) => /[\p{L}\p{N}]/u.test(t);
+  // Skipped phrases (v7.1): at most 200 per document, each at most 300 characters (a footer is far
+  // shorter; the cap keeps a backup file from smuggling in something huge).
+  const SKIPS_MAX = 200, SKIP_LEN = 300;
 
   function makeTitle(text) {
     const first = text.split('\n').map(l => l.trim()).find(Boolean) || 'Untitled';
@@ -1251,6 +1281,9 @@
     created: Number.isFinite, updated: Number.isFinite,
     pinned: (v) => typeof v === 'boolean',
     marksFor: isNat,
+    // v7.1 skipped phrases: a short list of short strings (the same limits addSkip keeps to).
+    skips: (v) => Array.isArray(v) && v.length <= SKIPS_MAX
+      && v.every(s => typeof s === 'string' && s.trim().length > 0 && s.length <= SKIP_LEN),
   };
   const MARK_FIELDS = {
     id: (v) => typeof v === 'string' && SAFE_ID.test(v),
@@ -1692,6 +1725,10 @@
   // While the controls slide up or down, "Back to reading spot" stays hidden whoever asks to show it
   // (a sentence ending mid-slide used to bring it back over Play / Back / Forward). Set in setCollapsed.
   let pillHoldUntil = 0;
+  // Turning the phone (v7.1): the width the page was last laid out for. While the width differs, the
+  // phone is mid-turn, so its scrolls don't count as yours. 300 ms lets iPhone finish the new layout.
+  let viewWidth = window.innerWidth, turnTimer = 0;
+  const TURN_SETTLE_MS = 300;
   let finds = [];        // search matches: [{a: {i, o}, b: {i, o}}] (start and end, as sentence + character)
   let findAt = -1;       // the match you're on
   let findTimer = 0;     // a search waiting for you to pause typing (0 = none)
@@ -1722,6 +1759,7 @@
       toast('Highlights in this document can’t be shown after an app or iPhone update, and new ones can’t be added to it. They’re still listed in Highlights and notes.', 7000);
     }
     $('readerTitle').textContent = cur.title;
+    buildSkips(); // before renderSentences, which paints them
     renderSentences($('readerText'), 0);
     closeSheet();
     setCollapsed(false);
@@ -1754,6 +1792,7 @@
       sentEls[i] = span;
     }
     if (finds.length) paintFinds(); // the page was rebuilt, so the search marks must be redrawn on the new text
+    paintSkips(); // the same for the faded skipped words (v7.1)
   }
 
   // ---------- Highlights and notes ----------
@@ -1985,6 +2024,7 @@
     pendingSel = null;
     if (btn.dataset.c) { addMark(r, btn.dataset.c); return; }
     if (btn.dataset.act === 'remove') { removeMarksIn(r); return; }
+    if (btn.dataset.act === 'skip') { addSkip(sliceText(r.s, r.a, r.e, r.b)); return; }
     // Note: inside one highlight already? Open its note. Otherwise make a yellow one and open that.
     const inside = (cur.marks || []).find(m => cmp(m.s, m.a, r.s, r.a) <= 0 && cmp(r.e, r.b, m.e, m.b) <= 0);
     const m = inside || addMark(r, 'yellow');
@@ -2282,6 +2322,9 @@
     if (currentView() !== 'readerView' || !cur) return;
     updateKnob();
     if (Date.now() < autoScrollUntil) return;
+    // Turning the phone re-wraps the text and moves it under the screen. That scroll is the phone, not
+    // you, so it must not switch following off (v7.1; the resize handler re-centers once it settles).
+    if (window.innerWidth !== viewWidth) return;
     const r = curRect();
     const strip = visibleStrip();
     follow = !!r && r.bottom > strip.top && r.top < strip.bottom;
@@ -2503,10 +2546,11 @@
   function speakCurrent() {
     if (!synth || !cur) return;
     // Skip anything with nothing to say (a row of dashes, a lone web address turned into nothing).
-    while (cur.pos < sents.length && !hasWords(speakable(sents[cur.pos].t))) cur.pos++;
+    // A sentence made only of skipped words (v7.1) counts as nothing to say too.
+    while (cur.pos < sents.length && !hasWords(spoken(cur.pos))) cur.pos++;
     if (cur.pos >= sents.length) { finish(); return; }
     const my = ++token;
-    const u = new SpeechSynthesisUtterance(speakable(sents[cur.pos].t));
+    const u = new SpeechSynthesisUtterance(spoken(cur.pos));
     const v = currentVoice();
     if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = 'en-US'; }
     u.rate = prefs.rate;
@@ -2585,33 +2629,42 @@
   // "Read from here".
   const canPaint = typeof CSS !== 'undefined' && !!CSS.highlights && typeof Highlight === 'function';
 
-  function findPattern(q) {
-    const words = q.trim().split(/\s+/).map(w => w
-      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')        // treat symbols in what you typed as plain text
-      .replace(/['’‘]/g, "['’‘]").replace(/["“”]/g, '["“”]'));
+  // anyNumber (used by Skip, v7.1): every run of digits matches any number, so a journal footer
+  // like "JAMA. 2024;331(5):412" also matches the next page's "...:413".
+  function findPattern(q, anyNumber) {
+    const words = q.trim().split(/\s+/).map(w => {
+      let x = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // treat symbols in what you typed as plain text
+      if (anyNumber) x = x.replace(/\d+/g, '\\d+');
+      return x.replace(/['’‘]/g, "['’‘]").replace(/["“”]/g, '["“”]');
+    });
     return new RegExp(words.join('\\s+'), 'gi');      // any run of spaces between words matches
   }
 
+  // Every match of `re` in the document, as [{a: {i, o}, b: {i, o}}]. Shared by Search and Skip.
   // Searches paragraph by paragraph (sentences joined with a space, the way they show on screen),
   // so a phrase that runs from one sentence piece into the next is still found.
+  function matchRanges(re) {
+    const out = [];
+    let i = 0;
+    while (i < sents.length) {
+      const p = sents[i].p, starts = [], texts = [];
+      let len = 0;
+      for (; i < sents.length && sents[i].p === p; i++) {
+        starts.push({ i, at: len });
+        texts.push(sents[i].t);
+        len += sents[i].t.length + 1;
+      }
+      for (const m of texts.join(' ').matchAll(re)) {
+        out.push({ a: paraPoint(starts, m.index, false), b: paraPoint(starts, m.index + m[0].length, true) });
+      }
+    }
+    return out;
+  }
   function runFind(q) {
     finds = [];
     findAt = -1;
     if (q.trim()) {
-      const re = findPattern(q);
-      let i = 0;
-      while (i < sents.length) {
-        const p = sents[i].p, starts = [], texts = [];
-        let len = 0;
-        for (; i < sents.length && sents[i].p === p; i++) {
-          starts.push({ i, at: len });
-          texts.push(sents[i].t);
-          len += sents[i].t.length + 1;
-        }
-        for (const m of texts.join(' ').matchAll(re)) {
-          finds.push({ a: paraPoint(starts, m.index, false), b: paraPoint(starts, m.index + m[0].length, true) });
-        }
-      }
+      finds = matchRanges(findPattern(q));
       // Start at the first match at or after your reading spot, so a search doesn't throw you back to the top.
       findAt = finds.length ? Math.max(0, finds.findIndex(f => f.a.i >= cur.pos)) : -1;
     }
@@ -2669,10 +2722,128 @@
     if (findAt >= 0 && finds.length) CSS.highlights.set('rl-find-now', new Highlight(findRange(finds[findAt])));
   }
 
+  // ---------- Skipped phrases (v7.1) ----------
+  // A phrase you choose (a journal's name and issue at the foot of every page, for example) is never
+  // read aloud anywhere in this document. Saved with the document as cur.skips = [phrase, ...].
+  // Only what the voice says changes: the text on screen, highlights, notes and your spot stay exactly
+  // as they were, so removing a phrase from the list brings everything back as before.
+  let skipCuts = new Map(); // sentence -> [[from, to], ...]: the stretches the voice leaves out
+  let skipRanges = [];      // every skipped stretch as {a, b} (for fading them on the page)
+  let skipCounts = [];      // how many places each phrase matched, in list order
+  // Worked out once when a document opens or the list changes, never per sentence spoken.
+  function buildSkips() {
+    skipCuts = new Map();
+    skipRanges = [];
+    skipCounts = [];
+    for (const q of (cur && cur.skips) || []) {
+      const ranges = matchRanges(findPattern(q, true));
+      skipCounts.push(ranges.length);
+      for (const r of ranges) {
+        skipRanges.push(r);
+        for (let i = r.a.i; i <= r.b.i; i++) {
+          const from = i === r.a.i ? r.a.o : 0;
+          const to = i === r.b.i ? r.b.o : sents[i].t.length;
+          if (to <= from) continue;
+          if (!skipCuts.has(i)) skipCuts.set(i, []);
+          skipCuts.get(i).push([from, to]);
+        }
+      }
+    }
+    for (const list of skipCuts.values()) list.sort((x, y) => x[0] - y[0]);
+  }
+  // Sentence i with its skipped stretches blanked out (a space each, so the words either side stay apart).
+  function withoutSkips(i) {
+    const t = sents[i].t, cuts = skipCuts.get(i);
+    if (!cuts) return t;
+    let out = '', at = 0;
+    for (const [from, to] of cuts) {
+      if (from > at) out += t.slice(at, from);
+      out += ' ';
+      at = Math.max(at, to); // overlapping phrases: never step backward
+    }
+    return out + t.slice(at);
+  }
+  // Exactly what the voice says for sentence i. Every place that speaks, or decides a sentence has
+  // nothing to say, goes through here.
+  const spoken = (i) => speakable(withoutSkips(i));
+
+  // Fades and crosses out the skipped words on the page (drawn on top, like search matches).
+  // On an iPhone too old for this, skipping still works; the words just don't look faded.
+  function paintSkips() {
+    if (!canPaint) return;
+    CSS.highlights.delete('rl-skip');
+    if (!skipRanges.length) return;
+    const all = new Highlight();
+    for (const r of skipRanges) if (sentEls[r.a.i] && sentEls[r.b.i]) all.add(findRange(r));
+    CSS.highlights.set('rl-skip', all);
+  }
+
+  // Same phrase = same pattern (capitals, spacing, quote style and the numbers themselves don't matter).
+  const skipKey = (q) => findPattern(q, true).source.toLowerCase();
+  const shortQ = (q) => (q.length > 40 ? q.slice(0, 38).trimEnd() + '…' : q);
+  // Adds a phrase to this document's skip list. Returns how many places it skips (0 = not added).
+  function addSkip(raw) {
+    if (!cur) return 0;
+    const q = String(raw).replace(/\s+/g, ' ').trim();
+    if (!hasWords(q)) { toast('Select some words to skip.'); return 0; }
+    if (q.length > SKIP_LEN) { toast('That’s too long to skip. Select a shorter phrase, like a page footer.'); return 0; }
+    const list = cur.skips || [];
+    if (list.some(s => skipKey(s) === skipKey(q))) { toast('Already skipped. See Options to read it again.'); return 0; }
+    if (list.length >= SKIPS_MAX) { toast('This document already skips ' + SKIPS_MAX + ' phrases. Remove one in Options first.'); return 0; }
+    const n = matchRanges(findPattern(q, true)).length;
+    // A selection that crosses from one paragraph into the next can't be matched (matching is per paragraph).
+    if (!n) { toast('Couldn’t match that. Select words inside one paragraph.'); return 0; }
+    cur.skips = list.concat(q);
+    saveSkips();
+    toast('Skipping “' + shortQ(q) + '” (' + plural(n, 'place') + '). To read it again: Options.', 4000);
+    return n;
+  }
+  // Takes phrase number k off the list, so it's read again.
+  function removeSkip(k) {
+    if (!cur || !cur.skips || !cur.skips[k]) return;
+    const q = cur.skips[k];
+    cur.skips = cur.skips.filter((_, j) => j !== k);
+    if (!cur.skips.length) delete cur.skips; // keep the saved record exactly as it was before any skips
+    saveSkips();
+    fillSkips();
+    toast('“' + shortQ(q) + '” will be read again.');
+  }
+  function saveSkips() {
+    savePos(true); // your own edit: always say if it couldn't be saved
+    buildSkips();
+    paintSkips();
+  }
+  // The list in Options: each phrase, how many places, and an X. Hidden when nothing is skipped.
+  function fillSkips() {
+    const list = $('skipList');
+    list.textContent = '';
+    const skips = (cur && cur.skips) || [];
+    $('skipField').hidden = !skips.length;
+    skips.forEach((q, k) => {
+      const li = document.createElement('li');
+      li.className = 'skip-row';
+      const txt = document.createElement('div');
+      txt.className = 'skip-q';
+      txt.textContent = q;
+      const n = document.createElement('span');
+      n.className = 'skip-n';
+      n.textContent = skipCounts[k] ? plural(skipCounts[k], 'place') : 'Not found in this document';
+      txt.appendChild(n);
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'skip-x';
+      x.dataset.k = k;
+      x.setAttribute('aria-label', 'Read “' + shortQ(q) + '” again');
+      x.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+      li.append(txt, x);
+      list.appendChild(li);
+    });
+  }
+
   function showFindCount() {
     const q = $('findInput').value.trim();
     $('findCount').textContent = !q ? '' : finds.length ? (findAt + 1) + ' of ' + finds.length : 'No matches';
-    for (const id of ['findPrev', 'findNext', 'findRead']) $(id).disabled = !finds.length;
+    for (const id of ['findPrev', 'findNext', 'findRead', 'findSkip']) $(id).disabled = !finds.length;
   }
 
   // Brings the current match to the middle of the part of the screen you can see (above the keyboard, if it's open).
@@ -2836,6 +3007,7 @@
     showRate();
     const n = (cur && cur.marks || []).length;
     $('marksBtn').textContent = 'Highlights and notes' + (n ? ' (' + n + ')' : '');
+    fillSkips();
     $('sheetWrap').hidden = false;
   }
   function closeSheet() { $('sheetWrap').hidden = true; }
@@ -2955,12 +3127,22 @@
   $('findPrev').addEventListener('click', () => { if (!finishTyping()) stepFind(-1); });
   $('findNext').addEventListener('click', () => { if (!finishTyping()) stepFind(1); });
   $('findRead').addEventListener('click', () => { finishTyping(); readFromFind(); });
+  // Skip (v7.1): never read what you searched for, anywhere in this document. Closes the search.
+  $('findSkip').addEventListener('click', () => {
+    finishTyping();
+    if (!finds.length) return;
+    if (addSkip($('findInput').value)) closeFind();
+  });
+  $('skipList').addEventListener('click', (e) => {
+    const x = e.target.closest('.skip-x');
+    if (x) removeSkip(+x.dataset.k);
+  });
   $('playBtn').addEventListener('click', () => (playing ? stop() : play()));
   // Back one sentence, stepping over lines with nothing to say (a row of dashes). Reading skips forward
   // over those, so landing on one replayed the same sentence and Back could never get past it.
   $('prevBtn').addEventListener('click', () => {
     let i = cur.pos - 1;
-    while (i > 0 && !hasWords(speakable(sents[i].t))) i--;
+    while (i > 0 && !hasWords(spoken(i))) i--;
     jumpTo(i);
   });
   $('nextBtn').addEventListener('click', () => jumpTo(cur.pos + 1));
@@ -3094,7 +3276,22 @@
 
   // Save your spot if the app is closed mid-sentence.
   window.addEventListener('pagehide', () => { if (cur) savePos(); });
-  window.addEventListener('resize', () => { if (cur && currentView() === 'readerView') { fitPadding(); updatePill(); } });
+  // Turning the phone (v7.1): if the screen was following the sentence being read, bring that sentence
+  // back to the middle once the new layout settles (before, the page kept its old scroll distance, the
+  // re-wrapped text slid away, and you had to tap "Back to reading spot"; Gary, 2026-11-27).
+  // Only a change of WIDTH counts as a turn: Safari's bars and the keyboard change only the height,
+  // and treating those as a turn would pull the page back while you scroll away.
+  window.addEventListener('resize', () => {
+    if (!(cur && currentView() === 'readerView')) { viewWidth = window.innerWidth; return; }
+    fitPadding();
+    updatePill();
+    if (window.innerWidth === viewWidth) return;
+    clearTimeout(turnTimer);
+    turnTimer = setTimeout(() => {
+      viewWidth = window.innerWidth; // from here on, scrolls are yours again
+      if (follow) scrollToCurrent(false);
+    }, TURN_SETTLE_MS);
+  });
 
   // Offline support: lets the app open with no internet after the first visit.
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
@@ -3117,7 +3314,11 @@
     marks: () => cur && cur.marks, addMark, readSelection, sliceText, marksAsText, openNote,
     exportHTML, exportMarkedText,
     find: (q) => { openFind(); $('findInput').value = q; runFind(q); return { n: finds.length, at: findAt }; },
-    finds: () => finds.map(f => ({ ...f, text: findRange(f).toString() })), findAt: () => findAt, stepFind
+    finds: () => finds.map(f => ({ ...f, text: findRange(f).toString() })), findAt: () => findAt, stepFind,
+    // v7.1: skipped phrases. spoken(i) = exactly what the voice says for sentence i.
+    addSkip, removeSkip, skips: () => (cur && cur.skips) || [], spoken, skipCounts: () => skipCounts,
+    skipPainted: () => (canPaint && CSS.highlights.has('rl-skip')) ? [...CSS.highlights.get('rl-skip')].map(r => r.toString()) : null,
+    sents: () => sents.map(s => s.t)
   };
 })();
 </script>
